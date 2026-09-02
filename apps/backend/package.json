@@ -9,10 +9,12 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
     "@concall/shared": "workspace:*",
+    "@types/pg": "^8.23.1",
     "axios": "^1.8.1",
     "bullmq": "^5.41.6",
     "cors": "^2.8.5",
@@ -21,6 +23,7 @@
     "express": "^4.21.2",
     "ioredis": "^5.6.0",
     "pdfjs-dist": "^4.10.38",
+    "pg": "^8.23.0",
     "postgres": "^3.4.5",
     "ws": "^8.18.1",
     "zod": "^3.24.2"

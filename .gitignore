@@ -27,9 +27,12 @@ Thumbs.db
 .idea/
 
 # Downloaded files / data storage
+.pgdata/
 data/raw/*
 !data/raw/.gitkeep
 data/extracted/*
 !data/extracted/.gitkeep
 data/summaries/*
 !data/summaries/.gitkeep
+
+.pgdata/
