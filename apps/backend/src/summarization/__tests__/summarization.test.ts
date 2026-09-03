@@ -1082,6 +1082,233 @@ describe('Phase 5 Summarization Unit Tests', () => {
       }
     });
   });
+
+  describe('12. Phase 8D-W RPM-Aware Groq Rate-Limit Handling Tests', () => {
+    test('1. TPM exhausted → token reset selected', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-tokens': '0',
+        'x-ratelimit-reset-tokens': '12.4s',
+        'x-ratelimit-remaining-requests': '10',
+        'x-ratelimit-reset-requests': '1.2s',
+      }, 1);
+
+      assert.strictEqual(calc.source, 'x-ratelimit-reset-tokens (TPM exhausted)');
+      assert.strictEqual(calc.delayMs, 13900, '12400ms + 1500ms safety buffer');
+    });
+
+    test('2. RPM exhausted → request reset selected', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-tokens': '8000',
+        'x-ratelimit-reset-tokens': '1ms',
+        'x-ratelimit-remaining-requests': '0',
+        'x-ratelimit-reset-requests': '12.4s',
+      }, 1);
+
+      assert.strictEqual(calc.source, 'x-ratelimit-reset-requests (RPM exhausted)');
+      assert.strictEqual(calc.delayMs, 13900, '12400ms + 1500ms safety buffer');
+    });
+
+    test('3. TPM recovered but RPM exhausted → request reset selected', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-tokens': '8000',
+        'x-ratelimit-reset-tokens': '1ms',
+        'x-ratelimit-remaining-requests': '0',
+        'x-ratelimit-reset-requests': '15.0s',
+        'retry-after': '1.35s',
+      }, 1);
+
+      assert.strictEqual(calc.source, 'x-ratelimit-reset-requests (RPM exhausted)');
+      assert.strictEqual(calc.delayMs, 16500, '15000ms + 1500ms safety buffer');
+    });
+
+    test('4. Both TPM and RPM exhausted → waits for the longer relevant reset', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-tokens': '0',
+        'x-ratelimit-reset-tokens': '18.0s',
+        'x-ratelimit-remaining-requests': '0',
+        'x-ratelimit-reset-requests': '12.0s',
+      }, 1);
+
+      assert.strictEqual(calc.source, 'both (TPM & RPM exhausted)');
+      assert.strictEqual(calc.delayMs, 19500, '18000ms + 1500ms safety buffer');
+    });
+
+    test('5. retry-after shorter than request reset → request reset wins when RPM exhausted', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-requests': '0',
+        'x-ratelimit-reset-requests': '14.0s',
+        'retry-after': '1.35s',
+      }, 1);
+
+      assert.strictEqual(calc.source, 'x-ratelimit-reset-requests (RPM exhausted)');
+      assert.strictEqual(calc.delayMs, 15500, '14000ms + 1500ms safety buffer');
+    });
+
+    test('6. retry-after longer than request reset → longer safe delay selected', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-requests': '0',
+        'x-ratelimit-reset-requests': '5.0s',
+        'retry-after': '20.0s',
+      }, 1);
+
+      assert.strictEqual(calc.source, 'x-ratelimit-reset-requests (RPM exhausted)');
+      assert.strictEqual(calc.delayMs, 21500, '20000ms + 1500ms safety buffer');
+    });
+
+    test('7. Missing request headers → existing fallback behavior', () => {
+      const calc = calculateGroqRateLimitDelay({}, 1);
+      assert.strictEqual(calc.source, 'exponential-backoff');
+      assert.strictEqual(calc.delayMs, 6500, '5000ms fallback + 1500ms safety buffer');
+    });
+
+    test('8. Duration parsing remains correct for ms, s, m+s formats', () => {
+      assert.strictEqual(parseGroqResetDuration('350ms'), 350);
+      assert.strictEqual(parseGroqResetDuration('12.4s'), 12400);
+      assert.strictEqual(parseGroqResetDuration('1m2.5s'), 62500);
+      assert.strictEqual(parseGroqResetDuration('2m'), 120000);
+    });
+
+    test('9. Safety margin remains applied to all rate-limit delays', () => {
+      const calc = calculateGroqRateLimitDelay({ 'x-ratelimit-reset-requests': '4.0s', 'x-ratelimit-remaining-requests': '0' }, 1);
+      assert.strictEqual(calc.delayMs, 5500, '4000ms + 1500ms safety margin');
+    });
+
+    test('10. Minimum floor remains applied when RPM or TPM is 0', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-requests': '0',
+        'x-ratelimit-reset-requests': '1.0s',
+      }, 1);
+
+      assert.strictEqual(calc.delayMs, 5000, 'Floor of 5000ms applies when quota is 0');
+    });
+
+    test('11. Maximum delay remains bounded to 60,000ms', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-tokens': '0',
+        'x-ratelimit-reset-tokens': '120.0s',
+      }, 1);
+
+      assert.strictEqual(calc.delayMs, 60000, 'Capped at 60000ms maximum');
+    });
+
+    test('12. 413 remains non-retryable', async () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      const originalKey = process.env.GROQ_API_KEY;
+      const originalPost = axios.post;
+      let postCalls = 0;
+
+      try {
+        process.env.LLM_PROVIDER = 'groq';
+        process.env.GROQ_API_KEY = 'mock_groq_key';
+        axios.post = (async () => {
+          postCalls++;
+          throw { response: { status: 413 }, message: 'Payload Too Large' };
+        }) as any;
+
+        const client = new LlmClient();
+        await assert.rejects(
+          async () => client.generateCompletion({ systemPrompt: 's', userPrompt: 'u' }),
+          /HTTP 413 Payload Too Large/
+        );
+        assert.strictEqual(postCalls, 1, '413 must fail immediately on attempt 1');
+      } finally {
+        axios.post = originalPost;
+        process.env.LLM_PROVIDER = originalProvider;
+        process.env.GROQ_API_KEY = originalKey;
+      }
+    });
+
+    test('13. 5xx remains retryable up to maxRetries', async () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      const originalKey = process.env.GROQ_API_KEY;
+      const originalPost = axios.post;
+      let postCalls = 0;
+
+      try {
+        process.env.LLM_PROVIDER = 'groq';
+        process.env.GROQ_API_KEY = 'mock_groq_key';
+        axios.post = (async () => {
+          postCalls++;
+          throw { response: { status: 502 }, message: 'Bad Gateway' };
+        }) as any;
+
+        const client = new LlmClient();
+        await assert.rejects(
+          async () => client.generateCompletion({ systemPrompt: 's', userPrompt: 'u' }),
+          /failed after 3 retries/
+        );
+        assert.strictEqual(postCalls, 4, '1 initial call + 3 retries = 4 attempts');
+      } finally {
+        axios.post = originalPost;
+        process.env.LLM_PROVIDER = originalProvider;
+        process.env.GROQ_API_KEY = originalKey;
+      }
+    });
+
+    test('14. Retry count remains bounded to maxRetries for RPM 429', async () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      const originalKey = process.env.GROQ_API_KEY;
+      const originalPost = axios.post;
+      let postCalls = 0;
+
+      try {
+        process.env.LLM_PROVIDER = 'groq';
+        process.env.GROQ_API_KEY = 'mock_groq_key';
+        axios.post = (async () => {
+          postCalls++;
+          throw {
+            response: {
+              status: 429,
+              headers: { 'x-ratelimit-remaining-requests': '0', 'x-ratelimit-reset-requests': '1s' },
+            },
+            message: 'Too Many Requests',
+          };
+        }) as any;
+
+        const client = new LlmClient();
+        await assert.rejects(
+          async () => client.generateCompletion({ systemPrompt: 's', userPrompt: 'u' }),
+          /Groq API call failed after 3 retries/
+        );
+        assert.strictEqual(postCalls, 4, '1 initial call + 3 retries = 4 attempts');
+      } finally {
+        axios.post = originalPost;
+        process.env.LLM_PROVIDER = originalProvider;
+        process.env.GROQ_API_KEY = originalKey;
+      }
+    });
+
+    test('15. No sensitive information logged in RPM telemetry', async () => {
+      const secretKey = 'gsk_SECRET_KEY_MUST_NOT_BE_LOGGED';
+      const calc = calculateGroqRateLimitDelay(
+        {
+          'x-ratelimit-remaining-requests': '0',
+          'x-ratelimit-reset-requests': '12.4s',
+          'authorization': `Bearer ${secretKey}`,
+        },
+        2
+      );
+
+      const msg = `[GROQ 429 BACKOFF] model=openai/gpt-oss-120b attempt=2/3 remaining_requests=${calc.remainingRequests} reset_requests=${calc.resetRequestsStr} retry_delay=${(calc.delayMs / 1000).toFixed(1)}s source="${calc.source}"`;
+
+      assert.strictEqual(msg.includes(secretKey), false, 'Must not log API key');
+      assert.strictEqual(msg.includes('Bearer'), false, 'Must not log Authorization header');
+      assert.ok(msg.includes('remaining_requests=0'));
+      assert.ok(msg.includes('reset_requests=12.4s'));
+      assert.ok(msg.includes('source="x-ratelimit-reset-requests (RPM exhausted)"'));
+    });
+
+    test('16. remaining_requests = 1 treats RPM as exhausted and selects reset-requests over short retry-after', () => {
+      const calc = calculateGroqRateLimitDelay({
+        'x-ratelimit-remaining-tokens': '8000',
+        'x-ratelimit-reset-tokens': '1ms',
+        'x-ratelimit-remaining-requests': '1',
+        'x-ratelimit-reset-requests': '12.4s',
+        'retry-after': '1.35s',
+      }, 1);
+
+      assert.strictEqual(calc.source, 'x-ratelimit-reset-requests (RPM exhausted)');
+      assert.strictEqual(calc.delayMs, 13900, '12400ms + 1500ms safety buffer — 2.9s fallback prevented');
+    });
+  });
 });
-
-

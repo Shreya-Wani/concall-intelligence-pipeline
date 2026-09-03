@@ -58,12 +58,15 @@ export interface GroqRateLimitCalcResult {
   remainingTokens: number | null;
   resetTokensStr: string | null;
   resetTokensMs: number | null;
+  remainingRequests: number | null;
+  resetRequestsStr: string | null;
+  resetRequestsMs: number | null;
   retryAfterMs: number | null;
   source: string;
 }
 
 /**
- * Calculates TPM-aware rate-limit delay for Groq HTTP 429 errors.
+ * Calculates TPM and RPM-aware rate-limit delay for Groq HTTP 429 errors.
  *
  * Headers inspected:
  * - retry-after / retry-after-ms
@@ -91,54 +94,80 @@ export function calculateGroqRateLimitDelay(
   const resetTokensStr = normHeaders['x-ratelimit-reset-tokens'] ? String(normHeaders['x-ratelimit-reset-tokens']) : null;
   const resetTokensMs = parseGroqResetDuration(resetTokensStr);
 
+  const rawRemainingRequests = normHeaders['x-ratelimit-remaining-requests'];
+  const remainingRequests =
+    rawRemainingRequests != null && !isNaN(parseFloat(String(rawRemainingRequests)))
+      ? parseFloat(String(rawRemainingRequests))
+      : null;
+
+  const resetRequestsStr = normHeaders['x-ratelimit-reset-requests'] ? String(normHeaders['x-ratelimit-reset-requests']) : null;
+  const resetRequestsMs = parseGroqResetDuration(resetRequestsStr);
+
   const retryAfterStr =
     normHeaders['retry-after'] || normHeaders['retry-after-ms']
       ? String(normHeaders['retry-after'] || normHeaders['retry-after-ms'])
       : null;
   const retryAfterMs = parseGroqResetDuration(retryAfterStr);
 
-  const resetRequestsStr = normHeaders['x-ratelimit-reset-requests'] ? String(normHeaders['x-ratelimit-reset-requests']) : null;
-  const resetRequestsMs = parseGroqResetDuration(resetRequestsStr);
-
   let baseDelayMs: number;
   let source: string;
 
-  // Rule 1: Remaining tokens <= 0 AND reset-tokens header available -> Token quota window is exhausted
-  if (remainingTokens !== null && remainingTokens <= 0 && resetTokensMs !== null && resetTokensMs > 0) {
-    baseDelayMs = resetTokensMs;
+  const isTpmExhausted = remainingTokens !== null && remainingTokens <= 0 && resetTokensMs !== null && resetTokensMs > 0;
+  const isRpmExhausted = remainingRequests !== null && remainingRequests <= 1 && resetRequestsMs !== null && resetRequestsMs > 0;
+
+  if (isTpmExhausted && isRpmExhausted) {
+    baseDelayMs = Math.max(resetTokensMs!, resetRequestsMs!, retryAfterMs || 0);
+    source = 'both (TPM & RPM exhausted)';
+  } else if (isTpmExhausted) {
+    baseDelayMs = Math.max(resetTokensMs!, resetRequestsMs || 0, retryAfterMs || 0);
     source = 'x-ratelimit-reset-tokens (TPM exhausted)';
-  } else if (resetTokensMs !== null && resetTokensMs > 0) {
-    baseDelayMs = Math.max(resetTokensMs, retryAfterMs || 0);
-    source = 'x-ratelimit-reset-tokens';
-  } else if (retryAfterMs !== null && retryAfterMs > 0) {
-    baseDelayMs = retryAfterMs;
-    source = 'retry-after';
-  } else if (resetRequestsMs !== null && resetRequestsMs > 0) {
-    baseDelayMs = resetRequestsMs;
-    source = 'x-ratelimit-reset-requests';
+  } else if (isRpmExhausted) {
+    baseDelayMs = Math.max(resetRequestsMs!, resetTokensMs || 0, retryAfterMs || 0);
+    source = 'x-ratelimit-reset-requests (RPM exhausted)';
   } else {
-    // Exponential backoff (~5s, ~10s, ~20s) plus bounded random jitter (0-1000ms)
-    baseDelayMs = Math.min(5000 * Math.pow(2, retries - 1), 30000);
-    source = 'exponential-backoff';
+    // Neither remaining count is strictly <= 1, so pick max available delay header
+    const candidateDelays: { delay: number; src: string }[] = [];
+    if (resetTokensMs !== null && resetTokensMs > 0) candidateDelays.push({ delay: resetTokensMs, src: 'x-ratelimit-reset-tokens' });
+    if (resetRequestsMs !== null && resetRequestsMs > 0) candidateDelays.push({ delay: resetRequestsMs, src: 'x-ratelimit-reset-requests' });
+    if (retryAfterMs !== null && retryAfterMs > 0) candidateDelays.push({ delay: retryAfterMs, src: 'retry-after' });
+
+    if (candidateDelays.length > 0) {
+      candidateDelays.sort((a, b) => b.delay - a.delay);
+      baseDelayMs = candidateDelays[0].delay;
+      source = candidateDelays[0].src;
+    } else {
+      // Exponential backoff fallback (~5s, ~10s, ~20s) plus bounded random jitter (0-1000ms)
+      baseDelayMs = Math.min(5000 * Math.pow(2, retries - 1), 30000);
+      source = 'exponential-backoff';
+    }
   }
 
   // Safety margin: Add +1500ms safety buffer so request doesn't hit server at exact boundary
   const safetyMarginMs = 1500;
   let finalDelayMs = baseDelayMs + safetyMarginMs;
 
-  // Floor: Minimum delay floor of 5,000ms for TPM exhaustion
-  if (remainingTokens !== null && remainingTokens <= 0) {
+  // Floor: Minimum delay floor of 5,000ms if quota window exhaustion is indicated
+  if (
+    (remainingTokens !== null && remainingTokens <= 0) ||
+    (remainingRequests !== null && remainingRequests <= 1) ||
+    (resetRequestsMs !== null && resetRequestsMs > 0) ||
+    (resetTokensMs !== null && resetTokensMs > 0)
+  ) {
     finalDelayMs = Math.max(finalDelayMs, 5000);
   }
 
   // Ceiling: Cap max delay at 60,000ms
   finalDelayMs = Math.min(finalDelayMs, 60000);
 
+
   return {
     delayMs: finalDelayMs,
     remainingTokens,
     resetTokensStr,
     resetTokensMs,
+    remainingRequests,
+    resetRequestsStr,
+    resetRequestsMs,
     retryAfterMs,
     source,
   };
