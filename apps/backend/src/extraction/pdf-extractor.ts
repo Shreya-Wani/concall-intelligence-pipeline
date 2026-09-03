@@ -9,7 +9,44 @@ export async function extractPdfText(pdfPath: string): Promise<RawExtractionResu
   const dataBuffer = fs.readFileSync(pdfPath);
   const pages: ExtractionPage[] = [];
 
-  // Try standard pdf-parse or pdfjs-dist extraction first
+  // 1. Try PDFParse class extraction for full multi-page document structure
+  try {
+    const pdfParse = require('pdf-parse');
+    if (pdfParse && typeof pdfParse.PDFParse === 'function') {
+      const uint8 = new Uint8Array(dataBuffer);
+      const parser = new pdfParse.PDFParse(uint8);
+      const doc = await parser.load();
+      const numPages = doc.pageCount || doc._pdfInfo?.numPages || 25;
+
+      for (let i = 1; i <= numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((item: any) => item.str).join(' ').trim();
+
+        if (pageText.length > 0) {
+          pages.push({
+            pageNumber: i,
+            text: pageText,
+            charCount: pageText.length,
+          });
+        }
+      }
+
+      if (pages.length > 0) {
+        const fullText = pages.map((p) => p.text).join('\n\n');
+        return {
+          pageCount: pages.length,
+          rawText: fullText,
+          pages,
+          metadata: { method: 'pdf_parse_class' },
+        };
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[PDF EXTRACT] PDFParse class warning: ${err.message}. Trying standard pagerender...`);
+  }
+
+  // 2. Try standard pdf-parse pagerender callback
   try {
     const pdfParse = require('pdf-parse');
     const parseFunc = typeof pdfParse === 'function' ? pdfParse : pdfParse.default || pdfParse;
@@ -53,9 +90,8 @@ export async function extractPdfText(pdfPath: string): Promise<RawExtractionResu
     console.warn(`[PDF EXTRACT] Primary pdf-parse warning: ${err.message}. Running stream text extractor...`);
   }
 
-  // Resilient text stream extraction from PDF buffer
+  // 3. Resilient text stream extraction from PDF buffer
   const rawString = dataBuffer.toString('utf-8');
-  // Match text literal streams between '(' and ')' or text blocks
   const textMatches: string[] = [];
   const lineRegex = /\(([^)]+)\)\s*Tj/g;
   let match: RegExpExecArray | null;

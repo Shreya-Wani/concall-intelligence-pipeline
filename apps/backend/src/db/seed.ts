@@ -23,6 +23,13 @@ export const seedCompanies = [
     isin: 'INE044A01036',
     sector: 'Pharmaceuticals',
   },
+  {
+    name: 'Infosys Limited',
+    nseSymbol: 'INFY',
+    bseCode: '500209',
+    isin: 'INE009A01021',
+    sector: 'Information Technology',
+  },
 ];
 
 export async function seed() {

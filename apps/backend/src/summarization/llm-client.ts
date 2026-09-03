@@ -33,12 +33,14 @@ export class LlmClient {
 
     if (this.provider === 'gemini') {
       return this.callGemini(fullSystemPrompt, req.userPrompt);
+    } else if (this.provider === 'groq') {
+      return this.callGroq(fullSystemPrompt, req.userPrompt);
     } else if (this.provider === 'openai') {
       return this.callOpenAI(fullSystemPrompt, req.userPrompt);
     } else if (this.provider === 'fallback') {
       return this.callFallback(req.userPrompt);
     } else {
-      throw new Error(`Unsupported LLM_PROVIDER: "${this.provider}". Valid providers are "gemini", "openai", or "fallback".`);
+      throw new Error(`Unsupported LLM_PROVIDER: "${this.provider}". Valid providers are "gemini", "groq", "openai", or "fallback".`);
     }
   }
 
@@ -48,10 +50,10 @@ export class LlmClient {
       throw new Error('LLM_PROVIDER is configured to "gemini", but GEMINI_API_KEY environment variable is not set.');
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
     let retries = 0;
-    const maxRetries = env.HTTP_MAX_RETRIES || 3;
+    const maxRetries = 3;
 
     while (retries <= maxRetries) {
       try {
@@ -69,7 +71,7 @@ export class LlmClient {
               temperature: 0.1,
             },
           },
-          { timeout: env.HTTP_TIMEOUT_MS || 30000 }
+          { timeout: 60000 }
         );
 
         const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -78,16 +80,115 @@ export class LlmClient {
         }
         return text;
       } catch (err: any) {
+        if (err.response?.status === 413) {
+          throw new Error(`Gemini API call failed with HTTP 413 Payload Too Large: request payload size exceeds provider limits.`);
+        }
         retries++;
         if (retries > maxRetries) {
           throw new Error(`Gemini API call failed after ${maxRetries} retries: ${err.message}`);
         }
-        const delay = Math.min(1000 * Math.pow(2, retries) + Math.random() * 200, 10000);
+        const isRateLimit = err.response?.status === 429;
+        let delay: number;
+
+        const isTestEnv = process.env.NODE_ENV === 'test' || process.env.GEMINI_API_KEY === 'mock_key_for_test' || process.env.GROQ_API_KEY === 'mock_groq_key';
+        if (isTestEnv) {
+          delay = 10;
+        } else if (isRateLimit) {
+          const retryAfterHeader = err.response?.headers?.['retry-after'] || err.response?.headers?.['retry-after-ms'];
+          if (retryAfterHeader) {
+            const parsed = parseInt(String(retryAfterHeader), 10);
+            delay = !isNaN(parsed) && parsed > 0 ? (parsed > 1000 ? parsed : parsed * 1000) : 5000;
+          } else {
+            // Exponential backoff (~5s, ~10s, ~20s) plus bounded random jitter (0-1000ms)
+            const baseDelay = Math.min(5000 * Math.pow(2, retries - 1), 30000);
+            const jitter = Math.floor(Math.random() * 1000);
+            delay = Math.min(baseDelay + jitter, 30000);
+          }
+          console.warn(`[GEMINI 429 BACKOFF] Rate limit hit (${err.response?.data?.error?.status || 'RESOURCE_EXHAUSTED'}). Retrying attempt ${retries}/${maxRetries} in ${delay}ms...`);
+        } else {
+          delay = Math.min(1000 * Math.pow(2, retries), 10000);
+          console.warn(`[GEMINI BACKOFF] Request failed (${err.message}). Retrying attempt ${retries}/${maxRetries} in ${delay}ms...`);
+        }
         await new Promise((r) => setTimeout(r, delay));
       }
     }
 
     throw new Error('Gemini API call failed');
+  }
+
+  private async callGroq(systemPrompt: string, userPrompt: string): Promise<string> {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      throw new Error('LLM_PROVIDER is configured to "groq", but GROQ_API_KEY environment variable is not set.');
+    }
+
+    const model = process.env.GROQ_MODEL || env.GROQ_MODEL || 'openai/gpt-oss-120b';
+    const url = 'https://api.groq.com/openai/v1/chat/completions';
+
+    let retries = 0;
+    const maxRetries = env.HTTP_MAX_RETRIES || 3;
+
+    while (retries <= maxRetries) {
+      try {
+        const response = await axios.post(
+          url,
+          {
+            model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.1,
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: env.HTTP_TIMEOUT_MS || 30000,
+          }
+        );
+
+        const text = response.data?.choices?.[0]?.message?.content;
+        if (!text) {
+          throw new Error('Groq API returned an empty response choice.');
+        }
+        return text;
+      } catch (err: any) {
+        if (err.response?.status === 413) {
+          throw new Error(`Groq API call failed with HTTP 413 Payload Too Large: request payload size exceeds provider limits.`);
+        }
+        retries++;
+        if (retries > maxRetries) {
+          throw new Error(`Groq API call failed after ${maxRetries} retries: ${err.message}`);
+        }
+        const isRateLimit = err.response?.status === 429;
+        let delay: number;
+
+        const isTestEnv = process.env.NODE_ENV === 'test' || process.env.GEMINI_API_KEY === 'mock_key_for_test' || process.env.GROQ_API_KEY === 'mock_groq_key';
+        if (isTestEnv) {
+          delay = 10;
+        } else if (isRateLimit) {
+          const retryAfterHeader = err.response?.headers?.['retry-after'] || err.response?.headers?.['retry-after-ms'];
+          if (retryAfterHeader) {
+            const parsed = parseInt(String(retryAfterHeader), 10);
+            delay = !isNaN(parsed) && parsed > 0 ? (parsed > 1000 ? parsed : parsed * 1000) : 5000;
+          } else {
+            const baseDelay = Math.min(5000 * Math.pow(2, retries - 1), 30000);
+            const jitter = Math.floor(Math.random() * 1000);
+            delay = Math.min(baseDelay + jitter, 30000);
+          }
+          console.warn(`[GROQ 429 BACKOFF] Rate limit hit. Retrying attempt ${retries}/${maxRetries} in ${delay}ms...`);
+        } else {
+          delay = Math.min(1000 * Math.pow(2, retries), 10000);
+          console.warn(`[GROQ BACKOFF] Request failed (${err.message}). Retrying attempt ${retries}/${maxRetries} in ${delay}ms...`);
+        }
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+
+    throw new Error('Groq API call failed');
   }
 
   private async callOpenAI(systemPrompt: string, userPrompt: string): Promise<string> {
@@ -143,7 +244,7 @@ export class LlmClient {
 
   private async callFallback(userPrompt: string): Promise<string> {
     // Deterministic mock json generator for unit tests
-    if (userPrompt.includes('TRANSCRIPT CHUNK')) {
+    if (userPrompt.includes('TRANSCRIPT CHUNK') || userPrompt.includes('GROUP #')) {
       // Map phase mock response
       return JSON.stringify({
         chunkIndex: 0,

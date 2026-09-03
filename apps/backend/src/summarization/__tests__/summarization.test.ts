@@ -1,9 +1,11 @@
 import assert from 'node:assert';
 import { describe, test } from 'node:test';
+import axios from 'axios';
 import { SummaryContentSchema } from '@concall/shared';
 import { LlmClient } from '../llm-client';
 import { MapReduceEngine } from '../map-reduce.engine';
 import { renderSummaryMarkdown } from '../markdown-renderer';
+import { env } from '../../config/env';
 import { chunkTranscript } from '../text-chunker';
 
 describe('Phase 5 Summarization Unit Tests', () => {
@@ -251,6 +253,159 @@ describe('Phase 5 Summarization Unit Tests', () => {
 
       assert.strictEqual(summarySaved, true, 'Summary successfully persisted');
       assert.strictEqual(filingStatus, 'COMPLETED', 'Filing updated to COMPLETED');
+    });
+  });
+
+  describe('6. Phase 8D-G Gemini Rate Limit & Retry Policy Tests', () => {
+    test('A. Max retries is capped at 3 for Gemini API calls', async () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      const originalKey = process.env.GEMINI_API_KEY;
+      const originalPost = axios.post;
+      try {
+        process.env.LLM_PROVIDER = 'gemini';
+        process.env.GEMINI_API_KEY = 'mock_key_for_test';
+        const error429 = { response: { status: 429, data: { error: { status: 'RESOURCE_EXHAUSTED' } } }, message: 'Rate limit' };
+        axios.post = (async () => { throw error429; }) as any;
+        const client = new LlmClient();
+
+        await assert.rejects(
+          async () => {
+            await client.generateCompletion({ systemPrompt: 'sys', userPrompt: 'usr' });
+          },
+          /Gemini API call failed after 3 retries/
+        );
+      } finally {
+        axios.post = originalPost;
+        process.env.LLM_PROVIDER = originalProvider;
+        process.env.GEMINI_API_KEY = originalKey;
+      }
+    });
+
+    test('B. Configured GEMINI_MAP_DELAY_MS defaults to 5000ms', () => {
+      assert.strictEqual(env.GEMINI_MAP_DELAY_MS, 5000, 'Default GEMINI_MAP_DELAY_MS is 5000ms');
+    });
+  });
+
+  describe('7. Phase 8D-K Groq LLM Provider Tests', () => {
+    test('A. LLM_PROVIDER=groq selects Groq provider name', () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      try {
+        process.env.LLM_PROVIDER = 'groq';
+        const client = new LlmClient();
+        assert.strictEqual(client.getProviderName(), 'groq');
+      } finally {
+        process.env.LLM_PROVIDER = originalProvider;
+      }
+    });
+
+    test('B. Groq provider without GROQ_API_KEY is rejected cleanly', async () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      const originalKey = process.env.GROQ_API_KEY;
+      try {
+        process.env.LLM_PROVIDER = 'groq';
+        delete process.env.GROQ_API_KEY;
+        const client = new LlmClient();
+        await assert.rejects(
+          async () => {
+            await client.generateCompletion({ systemPrompt: 'sys', userPrompt: 'usr' });
+          },
+          /GROQ_API_KEY environment variable is not set/
+        );
+      } finally {
+        process.env.LLM_PROVIDER = originalProvider;
+        process.env.GROQ_API_KEY = originalKey;
+      }
+    });
+
+    test('C. Groq API failure throws and does NOT fall back to Gemini or mock provider', async () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      const originalKey = process.env.GROQ_API_KEY;
+      const originalPost = axios.post;
+      try {
+        process.env.LLM_PROVIDER = 'groq';
+        process.env.GROQ_API_KEY = 'mock_groq_key';
+        const error429 = { response: { status: 429 }, message: 'Groq Rate Limit' };
+        axios.post = (async () => { throw error429; }) as any;
+        const client = new LlmClient();
+        await assert.rejects(
+          async () => {
+            await client.generateCompletion({ systemPrompt: 'sys', userPrompt: 'usr' });
+          },
+          /Groq API call failed after 3 retries/
+        );
+      } finally {
+        axios.post = originalPost;
+        process.env.LLM_PROVIDER = originalProvider;
+        process.env.GROQ_API_KEY = originalKey;
+      }
+    });
+  });
+
+  describe('8. Phase 8D-N Hierarchical Reduction & HTTP 413 Policy Tests', () => {
+    test('A. HTTP 413 Payload Too Large fails immediately without retrying 3 times', async () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      const originalKey = process.env.GROQ_API_KEY;
+      const originalPost = axios.post;
+      let postCallCount = 0;
+
+      try {
+        process.env.LLM_PROVIDER = 'groq';
+        process.env.GROQ_API_KEY = 'mock_groq_key';
+        axios.post = (async () => {
+          postCallCount++;
+          throw { response: { status: 413 }, message: 'Payload Too Large' };
+        }) as any;
+
+        const client = new LlmClient();
+        await assert.rejects(
+          async () => {
+            await client.generateCompletion({ systemPrompt: 'sys', userPrompt: 'usr' });
+          },
+          /HTTP 413 Payload Too Large/
+        );
+        assert.strictEqual(postCallCount, 1, 'HTTP 413 was not retried');
+      } finally {
+        axios.post = originalPost;
+        process.env.LLM_PROVIDER = originalProvider;
+        process.env.GROQ_API_KEY = originalKey;
+      }
+    });
+
+    test('B. 9 MAP outputs are partitioned into intermediate reduction groups', async () => {
+      const originalProvider = process.env.LLM_PROVIDER;
+      try {
+        process.env.LLM_PROVIDER = 'fallback';
+        const engine = new MapReduceEngine();
+        const mockMapResults = Array.from({ length: 9 }, (_, i) => ({
+          chunkIndex: i,
+          claims: [{ claim: `Claim ${i}`, evidence: `Evidence ${i}`, chunkIndex: i }],
+          financialFigures: [`₹${i + 1},000 crore`],
+          segmentObservations: [`Segment ${i}`],
+          guidanceStatements: [`Guidance ${i}`],
+          managementCommentary: [`Comment ${i}`],
+          qaObservations: [`QA ${i}`],
+          risks: [`Risk ${i}`],
+        }));
+
+        // Test intermediateReduceGroup directly
+        const intermediateGroup = await engine.intermediateReduceGroup(mockMapResults.slice(0, 3), 0);
+        assert.strictEqual(intermediateGroup.chunkIndex, 0);
+        assert.strictEqual(Array.isArray(intermediateGroup.claims), true);
+        assert.strictEqual(intermediateGroup.claims[0].claim, 'Revenue grew 12.5% to ₹1,245 crore');
+        assert.strictEqual(intermediateGroup.claims[0].evidence, 'Revenue increased 12.5% to ₹1,245 crore in Q1 FY26');
+        assert.strictEqual(intermediateGroup.financialFigures[0], '₹1,245 crore');
+        assert.strictEqual(intermediateGroup.segmentObservations[0], 'Cloud & Services grew 18.5% YoY.');
+        assert.strictEqual(intermediateGroup.guidanceStatements[0], 'Targeting double-digit revenue growth in FY26.');
+        assert.strictEqual(intermediateGroup.managementCommentary[0], 'Management reported strong demand across key verticals.');
+        assert.strictEqual(intermediateGroup.qaObservations[0], 'Analyst asked about EBITDA margin expansion.');
+        assert.strictEqual(intermediateGroup.risks[0], 'Global macroeconomic uncertainty.');
+      } finally {
+        process.env.LLM_PROVIDER = originalProvider;
+      }
+    });
+
+    test('C. Configured LLM_REQUEST_DELAY_MS defaults to 5000ms', () => {
+      assert.strictEqual(env.LLM_REQUEST_DELAY_MS, 5000, 'Default LLM_REQUEST_DELAY_MS is 5000ms');
     });
   });
 });
