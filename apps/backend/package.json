@@ -11,12 +11,15 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts",
-    "test": "tsx --test src/watcher/__tests__/watcher.test.ts",
+    "test": "tsx --test src/watcher/__tests__/watcher.test.ts src/extraction/__tests__/extraction.test.ts src/summarization/__tests__/summarization.test.ts src/api/__tests__/api-ws.test.ts",
     "ingest:once": "tsx src/watcher/ingest-cli.ts",
-    "watcher": "tsx src/watcher/watcher-cli.ts"
+    "watcher": "tsx src/watcher/watcher-cli.ts",
+    "extract:once": "tsx src/extraction/extraction-cli.ts",
+    "summarize:once": "tsx src/summarization/summarize-cli.ts"
   },
   "dependencies": {
     "@concall/shared": "workspace:*",
+    "@types/pdf-parse": "^1.1.5",
     "@types/pg": "^8.23.1",
     "axios": "^1.8.1",
     "bullmq": "^5.41.6",
@@ -25,6 +28,7 @@
     "drizzle-orm": "^0.39.3",
     "express": "^4.21.2",
     "ioredis": "^5.6.0",
+    "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^4.10.38",
     "pg": "^8.23.0",
     "postgres": "^3.4.5",

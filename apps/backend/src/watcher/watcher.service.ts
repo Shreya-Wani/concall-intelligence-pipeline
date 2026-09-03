@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { companies, filings } from '../db/schema';
+import { wsManager } from '../ws/websocket.server';
 import { BseClient } from './bse.client';
 import { parseBseAnnouncement } from './bse.parser';
 import { findFilingByPdfHash, isLevel1Duplicate } from './dedup';
@@ -8,7 +9,7 @@ import { downloadPdfStream, generateDeterministicFilename } from './downloader';
 import { isTranscriptFiling, matchSeededCompany } from './filters';
 import { NseClient } from './nse.client';
 import { parseNseAnnouncement } from './nse.parser';
-import { IngestStats, NormalizedFiling, FilingSource } from './types';
+import { IngestStats, NormalizedFiling } from './types';
 
 export class WatcherService {
   private nseClient: NseClient;
@@ -54,10 +55,18 @@ export class WatcherService {
         } catch (err: any) {
           stats.failed++;
           console.error('[WATCHER] Error processing individual NSE filing:', err.message);
+          wsManager.broadcast('pipeline.error', {
+            stage: 'watcher',
+            errorMessage: `NSE announcement processing error: ${err.message}`,
+          });
         }
       }
     } catch (err: any) {
       console.error('[WATCHER] NSE polling encountered an error (isolated):', err.message);
+      wsManager.broadcast('pipeline.error', {
+        stage: 'watcher',
+        errorMessage: `NSE polling error: ${err.message}`,
+      });
     }
 
     return stats;
@@ -90,10 +99,18 @@ export class WatcherService {
         } catch (err: any) {
           stats.failed++;
           console.error('[WATCHER] Error processing individual BSE filing:', err.message);
+          wsManager.broadcast('pipeline.error', {
+            stage: 'watcher',
+            errorMessage: `BSE announcement processing error: ${err.message}`,
+          });
         }
       }
     } catch (err: any) {
       console.error('[WATCHER] BSE polling encountered an error (isolated):', err.message);
+      wsManager.broadcast('pipeline.error', {
+        stage: 'watcher',
+        errorMessage: `BSE polling error: ${err.message}`,
+      });
     }
 
     return stats;
@@ -163,6 +180,17 @@ export class WatcherService {
 
     console.log(`[DB] Inserted filing ${insertedFiling.id} with status DISCOVERED`);
 
+    // Broadcast filing.discovered AFTER DB insertion
+    wsManager.broadcast('filing.discovered', {
+      filingId: insertedFiling.id,
+      companyId,
+      companyName: matchedCompany.name,
+      source: filing.source,
+      announcementId: filing.sourceAnnouncementId,
+      subject: filing.subject || 'Corporate Announcement',
+      filingDate: filing.filingDate.toISOString(),
+    });
+
     if (!filing.pdfUrl) {
       console.log(`[DOWNLOAD] No PDF URL present for filing ${insertedFiling.id}`);
       return;
@@ -201,10 +229,28 @@ export class WatcherService {
 
       stats.downloaded++;
       console.log(`[DB] Filing ${insertedFiling.id} status updated to DOWNLOADED`);
+
+      // Broadcast filing.downloaded AFTER DB persistence (no localPath in payload)
+      wsManager.broadcast('filing.downloaded', {
+        filingId: insertedFiling.id,
+        companyId,
+        companyName: matchedCompany.name,
+        source: filing.source,
+        announcementId: filing.sourceAnnouncementId,
+        pdfHash: downloadRes.pdfHash,
+        byteSize: downloadRes.byteSize,
+      });
     } catch (err: any) {
       stats.failed++;
       console.error(`[DOWNLOAD] Failed downloading filing ${insertedFiling.id}:`, err.message);
       await db.update(filings).set({ status: 'FAILED' }).where(eq(filings.id, insertedFiling.id));
+
+      wsManager.broadcast('pipeline.error', {
+        stage: 'downloader',
+        filingId: insertedFiling.id,
+        companyName: matchedCompany.name,
+        errorMessage: `PDF download error: ${err.message}`,
+      });
     }
   }
 }

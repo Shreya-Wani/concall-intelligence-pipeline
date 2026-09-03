@@ -2,6 +2,7 @@ import app from './app';
 import { env } from './config/env';
 import { checkDbHealth } from './db';
 import { checkRedisHealth } from './redis';
+import { wsManager } from './ws/websocket.server';
 
 async function bootstrap() {
   console.log(`🚀 Starting Concall Intelligence Backend in ${env.NODE_ENV} mode...`);
@@ -11,7 +12,7 @@ async function bootstrap() {
   if (dbConnected) {
     console.log('✅ Connected to PostgreSQL database.');
   } else {
-    console.warn('⚠️  PostgreSQL connection check failed.');
+    console.warn('⚠️ PostgreSQL connection check failed.');
   }
 
   // Verify Redis connection
@@ -19,7 +20,7 @@ async function bootstrap() {
   if (redisConnected) {
     console.log('✅ Connected to Redis instance.');
   } else {
-    console.warn('⚠️  Redis connection check failed.');
+    console.warn('⚠️ Redis connection check failed.');
   }
 
   const server = app.listen(env.PORT, () => {
@@ -27,8 +28,12 @@ async function bootstrap() {
     console.log(`🩺 Health check endpoint available at http://localhost:${env.PORT}/api/health`);
   });
 
-  const shutdown = () => {
+  // Attach WebSocket server to HTTP server at path /ws
+  wsManager.init(server, '/ws');
+
+  const shutdown = async () => {
     console.log('Stopping server...');
+    await wsManager.close();
     server.close(() => {
       console.log('Server stopped.');
       process.exit(0);

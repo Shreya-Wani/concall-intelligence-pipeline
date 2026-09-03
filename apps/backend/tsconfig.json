@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
-      "@concall/shared": ["../../packages/shared/src/index.ts"]
+      "@concall/shared": ["../../packages/shared/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*"]
