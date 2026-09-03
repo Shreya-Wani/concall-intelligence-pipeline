@@ -113,7 +113,33 @@ export const SummaryDetail: React.FC<SummaryDetailProps> = ({ summary }) => {
       </div>
 
       {/* 3. Management Commentary */}
-      {renderListSection('Management Commentary', <Building2 className="w-5 h-5 text-[#0078d4]" />, management)}
+      <div className="bg-white border border-blue-200/80 rounded-xl p-5 mb-6 shadow-sm">
+        <h3 className="text-base font-extrabold text-blue-950 flex items-center mb-3">
+          <Building2 className="w-5 h-5 text-[#0078d4] mr-2" />
+          Management Commentary & Tone
+        </h3>
+        {summaryJson?.management_tone && (
+          <div className="mb-3.5 p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs font-bold text-blue-900 flex items-center">
+            <span className="text-[#0078d4] font-extrabold uppercase tracking-wide mr-2 text-[11px] bg-white px-2 py-0.5 rounded border border-blue-200 shadow-2xs">
+              Management Tone:
+            </span>
+            <span>{summaryJson.management_tone}</span>
+          </div>
+        )}
+        {management.length === 0 ? (
+          <p className="text-sm text-slate-500 italic">Not disclosed in transcript.</p>
+        ) : (
+          <ul className="space-y-2 text-sm text-slate-700">
+            {management.map((item, idx) => (
+              <li key={idx} className="flex items-start">
+                <span className="text-[#0078d4] font-bold mr-2">•</span>
+                <span className="leading-relaxed">{item}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
 
       {/* 4. Guidance & Outlook */}
       {renderListSection('Guidance & Future Outlook', <Target className="w-5 h-5 text-indigo-600" />, guidance)}

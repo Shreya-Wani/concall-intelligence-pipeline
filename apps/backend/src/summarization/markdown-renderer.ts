@@ -41,12 +41,16 @@ export function renderSummaryMarkdown(summary: SummaryContent): string {
 
   // 3. Management Commentary
   lines.push('## Management Commentary');
+  if (summary.management_tone) {
+    lines.push(`**Management Tone / Sentiment:** ${summary.management_tone}`);
+  }
   if (summary.management_commentary.length > 0) {
     summary.management_commentary.forEach((item) => lines.push(`- ${item}`));
   } else {
     lines.push('_Not disclosed in transcript._');
   }
   lines.push('');
+
 
   // 4. Guidance & Outlook
   lines.push('## Guidance & Future Outlook');

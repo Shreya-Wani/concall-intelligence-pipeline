@@ -373,7 +373,9 @@ Return a JSON object conforming strictly to this Zod schema structure:
   "source_url": ${input.sourceUrl ? `"${input.sourceUrl}"` : 'null'},
   "tldr": ["array of key bullet points summarizing the call"],
   "management_commentary": ["array of key management remarks"],
+  "management_tone": "Transcript-grounded management tone / sentiment (e.g. Cautiously optimistic on demand recovery with prudent margin focus)",
   "guidance": ["array of future guidance notes"],
+
   "segment_performance": [
     { "segment": "Segment Name", "notes": "Segment details and growth" }
   ],

@@ -30,6 +30,7 @@ export const SummaryContentSchema = z.object({
   source_url: z.string().nullable().optional(),
   tldr: z.array(z.string()),
   management_commentary: z.array(z.string()),
+  management_tone: z.string().nullable().optional(),
   guidance: z.array(z.string()),
   segment_performance: z.array(SegmentPerformanceSchema),
   key_metrics: z.array(KeyMetricSchema),
@@ -38,3 +39,4 @@ export const SummaryContentSchema = z.object({
 });
 
 export type SummaryContent = z.infer<typeof SummaryContentSchema>;
+
