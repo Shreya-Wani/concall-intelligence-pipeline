@@ -13,16 +13,16 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
   onRetry,
 }) => {
   return (
-    <div className="bg-rose-950/40 border border-rose-900/60 rounded-xl p-6 my-4 text-rose-200">
+    <div className="bg-rose-50 border border-rose-200 rounded-xl p-6 my-4 text-rose-900 shadow-sm">
       <div className="flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+        <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
         <div>
-          <h4 className="font-semibold text-rose-300">{title}</h4>
-          <p className="text-sm text-rose-300/80 mt-1">{message}</p>
+          <h4 className="font-bold text-rose-900">{title}</h4>
+          <p className="text-sm text-rose-700 mt-1">{message}</p>
           {onRetry && (
             <button
               onClick={onRetry}
-              className="mt-3 px-3 py-1.5 bg-rose-900/80 hover:bg-rose-800 text-rose-100 text-xs font-medium rounded-md transition-colors"
+              className="mt-3 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-md transition-colors shadow-sm"
             >
               Retry Connection
             </button>
@@ -32,3 +32,4 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
     </div>
   );
 };
+

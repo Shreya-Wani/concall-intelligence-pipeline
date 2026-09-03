@@ -79,15 +79,15 @@ export const Dashboard: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
+    <div className="min-h-screen bg-[#f0f7ff] text-slate-900 pb-12">
       <Header wsState={wsState} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 space-y-8">
         {/* A. Companies Section */}
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        <section className="bg-white border border-blue-200/80 rounded-xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold text-white flex items-center">
-              <Building2 className="w-4 h-4 mr-2 text-blue-400" />
+            <h2 className="text-base font-extrabold text-blue-950 flex items-center">
+              <Building2 className="w-5 h-5 mr-2 text-[#0078d4]" />
               Monitored Listed Companies ({companies.length})
             </h2>
           </div>
@@ -97,25 +97,25 @@ export const Dashboard: React.FC = () => {
           ) : errorCompanies ? (
             <ErrorState title="Companies Error" message={errorCompanies} onRetry={fetchCompaniesData} />
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-lg border border-blue-100">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950 text-slate-400 uppercase font-semibold border-b border-slate-800">
+                <thead className="bg-blue-50 text-blue-900 uppercase font-bold border-b border-blue-200">
                   <tr>
-                    <th className="py-2.5 px-3">Company Name</th>
-                    <th className="py-2.5 px-3">NSE Symbol</th>
-                    <th className="py-2.5 px-3">BSE Code</th>
-                    <th className="py-2.5 px-3">ISIN</th>
-                    <th className="py-2.5 px-3">Sector</th>
+                    <th className="py-3 px-3.5">Company Name</th>
+                    <th className="py-3 px-3.5">NSE Symbol</th>
+                    <th className="py-3 px-3.5">BSE Code</th>
+                    <th className="py-3 px-3.5">ISIN</th>
+                    <th className="py-3 px-3.5">Sector</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/80 text-slate-300">
+                <tbody className="divide-y divide-blue-100 text-slate-700 bg-white">
                   {companies.map((c) => (
-                    <tr key={c.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-2.5 px-3 font-semibold text-slate-200">{c.name}</td>
-                      <td className="py-2.5 px-3 font-mono text-blue-400">{c.nseSymbol || '-'}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-400">{c.bseCode || '-'}</td>
-                      <td className="py-2.5 px-3 font-mono text-slate-400">{c.isin || '-'}</td>
-                      <td className="py-2.5 px-3 text-slate-400">{c.sector || '-'}</td>
+                    <tr key={c.id} className="hover:bg-blue-50/60 transition-colors">
+                      <td className="py-3 px-3.5 font-bold text-slate-900">{c.name}</td>
+                      <td className="py-3 px-3.5 font-mono text-[#0078d4] font-bold">{c.nseSymbol || '-'}</td>
+                      <td className="py-3 px-3.5 font-mono text-slate-500">{c.bseCode || '-'}</td>
+                      <td className="py-3 px-3.5 font-mono text-slate-500">{c.isin || '-'}</td>
+                      <td className="py-3 px-3.5 text-slate-600 font-medium">{c.sector || '-'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -129,11 +129,13 @@ export const Dashboard: React.FC = () => {
           {/* B. Recent Summaries Section (2 Cols) */}
           <section className="lg:col-span-2 space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white flex items-center">
-                <Sparkles className="w-5 h-5 mr-2 text-emerald-400" />
+              <h2 className="text-lg font-extrabold text-blue-950 flex items-center">
+                <Sparkles className="w-5 h-5 mr-2 text-[#0078d4]" />
                 Recent AI Earnings Summaries
               </h2>
-              <span className="text-xs text-slate-400">{summaries.length} summaries</span>
+              <span className="text-xs font-bold text-[#0078d4] bg-blue-100/80 border border-blue-200 px-3 py-1 rounded-full shadow-xs">
+                {summaries.length} summaries
+              </span>
             </div>
 
             {loadingSummaries ? (
@@ -163,3 +165,5 @@ export const Dashboard: React.FC = () => {
     </div>
   );
 };
+
+

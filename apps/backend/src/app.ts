@@ -8,13 +8,25 @@ import { env } from './config/env';
 
 const app = express();
 
-// CORS configuration (restricting origin to FRONTEND_URL and local Vite dev ports)
+// CORS configuration (allowing local dev ports e.g. 5173, 5174, 5175 and FRONTEND_URL)
 app.use(
   cors({
-    origin: [env.FRONTEND_URL, 'http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        env.NODE_ENV === 'development' ||
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('http://127.0.0.1:') ||
+        origin === env.FRONTEND_URL
+      ) {
+        return callback(null, true);
+      }
+      callback(new Error('Not allowed by CORS'));
+    },
     credentials: true,
   })
 );
+
 
 // JSON body parser
 app.use(express.json());

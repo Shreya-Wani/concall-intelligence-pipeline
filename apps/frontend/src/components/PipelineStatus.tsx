@@ -10,15 +10,15 @@ export const PipelineStatus: React.FC<PipelineStatusProps> = ({ events }) => {
   const getEventIcon = (type: string) => {
     switch (type) {
       case 'filing.discovered':
-        return <Activity className="w-4 h-4 text-blue-400" />;
+        return <Activity className="w-4 h-4 text-[#0078d4]" />;
       case 'filing.downloaded':
-        return <Download className="w-4 h-4 text-sky-400" />;
+        return <Download className="w-4 h-4 text-sky-600" />;
       case 'transcript.extracted':
-        return <FileText className="w-4 h-4 text-purple-400" />;
+        return <FileText className="w-4 h-4 text-indigo-600" />;
       case 'summary.completed':
-        return <Sparkles className="w-4 h-4 text-emerald-400" />;
+        return <Sparkles className="w-4 h-4 text-emerald-600" />;
       case 'pipeline.error':
-        return <AlertTriangle className="w-4 h-4 text-rose-400" />;
+        return <AlertTriangle className="w-4 h-4 text-rose-600" />;
       default:
         return <CheckCircle2 className="w-4 h-4 text-slate-400" />;
     }
@@ -45,17 +45,19 @@ export const PipelineStatus: React.FC<PipelineStatusProps> = ({ events }) => {
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+    <div className="bg-white border border-blue-200/80 rounded-xl p-5 shadow-sm">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-base font-semibold text-white flex items-center">
-          <Activity className="w-4 h-4 mr-2 text-blue-400" />
+        <h3 className="text-base font-extrabold text-blue-950 flex items-center">
+          <Activity className="w-4 h-4 mr-2 text-[#0078d4]" />
           Live Pipeline Activity Stream
         </h3>
-        <span className="text-xs text-slate-400">{events.length} recent events</span>
+        <span className="text-xs font-bold text-[#0078d4] bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200">
+          {events.length} events
+        </span>
       </div>
 
       {events.length === 0 ? (
-        <div className="text-center py-6 text-xs text-slate-400 border border-dashed border-slate-800 rounded-lg">
+        <div className="text-center py-6 text-xs text-slate-600 border border-dashed border-blue-200 rounded-lg bg-blue-50/40">
           Waiting for live pipeline events... Watcher is actively polling NSE & BSE endpoints.
         </div>
       ) : (
@@ -63,13 +65,13 @@ export const PipelineStatus: React.FC<PipelineStatusProps> = ({ events }) => {
           {events.map((ev) => (
             <div
               key={ev.id}
-              className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs"
+              className="flex items-start gap-2.5 p-2.5 rounded-lg bg-blue-50/60 border border-blue-100 text-xs"
             >
               <div className="shrink-0 mt-0.5">{getEventIcon(ev.type)}</div>
               <div className="flex-1 min-w-0">
-                <p className="text-slate-200 font-medium leading-tight">{formatEventText(ev)}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">
-                  {new Date(ev.timestamp).toLocaleTimeString()} • <span className="font-mono">{ev.type}</span>
+                <p className="text-slate-800 font-bold leading-tight">{formatEventText(ev)}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5 font-medium">
+                  {new Date(ev.timestamp).toLocaleTimeString()} • <span className="font-mono text-[#0078d4] font-semibold">{ev.type}</span>
                 </p>
               </div>
             </div>
@@ -79,3 +81,5 @@ export const PipelineStatus: React.FC<PipelineStatusProps> = ({ events }) => {
     </div>
   );
 };
+
+

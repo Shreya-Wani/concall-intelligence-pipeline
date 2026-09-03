@@ -50,18 +50,19 @@ export const SummaryPage: React.FC = () => {
   }, [id]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
+    <div className="min-h-screen bg-[#f0f7ff] text-slate-900 pb-12">
       <Header wsState={wsState} />
 
       <div className="max-w-4xl mx-auto px-4 mb-6">
         <Link
           to="/"
-          className="inline-flex items-center text-xs font-medium text-slate-400 hover:text-slate-200 transition-colors"
+          className="inline-flex items-center text-xs font-bold text-[#0078d4] hover:text-[#005a9e] transition-colors bg-white px-3.5 py-2 rounded-lg border border-blue-200 shadow-sm"
         >
-          <ArrowLeft className="w-4 h-4 mr-1" />
+          <ArrowLeft className="w-4 h-4 mr-1.5" />
           Back to Dashboard
         </Link>
       </div>
+
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6">
         {loading ? (
@@ -77,3 +78,4 @@ export const SummaryPage: React.FC = () => {
     </div>
   );
 };
+
