@@ -11,6 +11,139 @@ If information is not disclosed in the transcript, return: "Not disclosed in tra
 Preserve exact financial values (e.g. ₹1,245 crore, $500 million, 12.5%, +150 bps, Q1 FY26, FY25, 2.5x, -5.2%).
 `.trim();
 
+/**
+ * Safely parses Groq rate-limit reset duration strings into milliseconds.
+ *
+ * Supported formats:
+ * - "1.35s" -> 1350ms
+ * - "7.66s" -> 7660ms
+ * - "1m2.5s" -> 62500ms
+ * - "2m" -> 120000ms
+ * - "350ms" -> 350ms
+ * - "1.35" -> 1350ms
+ * - 1.35 (number) -> 1350ms
+ */
+export function parseGroqResetDuration(durationStr: string | number | undefined | null): number | null {
+  if (durationStr == null) return null;
+  const str = String(durationStr).trim();
+  if (!str) return null;
+
+  // 1. Matches minutes + seconds (e.g. "1m2.5s", "2m", "15.2s")
+  const minSecMatch = str.match(/^(?:(\d+(?:\.\d+)?)m)?\s*(?:(\d+(?:\.\d+)?)s)?$/i);
+  if (minSecMatch && (minSecMatch[1] !== undefined || minSecMatch[2] !== undefined)) {
+    const mins = minSecMatch[1] ? parseFloat(minSecMatch[1]) : 0;
+    const secs = minSecMatch[2] ? parseFloat(minSecMatch[2]) : 0;
+    const totalMs = (mins * 60 + secs) * 1000;
+    return isNaN(totalMs) || totalMs <= 0 ? null : Math.round(totalMs);
+  }
+
+  // 2. Matches milliseconds (e.g. "350ms")
+  const msMatch = str.match(/^(\d+(?:\.\d+)?)ms$/i);
+  if (msMatch) {
+    const ms = parseFloat(msMatch[1]);
+    return isNaN(ms) || ms <= 0 ? null : Math.round(ms);
+  }
+
+  // 3. Fallback: plain float/int number e.g. "1.35" or 1500
+  const rawNum = parseFloat(str);
+  if (!isNaN(rawNum) && rawNum > 0) {
+    return Math.round(rawNum > 1000 ? rawNum : rawNum * 1000);
+  }
+
+  return null;
+}
+
+export interface GroqRateLimitCalcResult {
+  delayMs: number;
+  remainingTokens: number | null;
+  resetTokensStr: string | null;
+  resetTokensMs: number | null;
+  retryAfterMs: number | null;
+  source: string;
+}
+
+/**
+ * Calculates TPM-aware rate-limit delay for Groq HTTP 429 errors.
+ *
+ * Headers inspected:
+ * - retry-after / retry-after-ms
+ * - x-ratelimit-remaining-tokens
+ * - x-ratelimit-reset-tokens
+ * - x-ratelimit-remaining-requests
+ * - x-ratelimit-reset-requests
+ */
+export function calculateGroqRateLimitDelay(
+  headers: Record<string, any> = {},
+  retries: number = 1
+): GroqRateLimitCalcResult {
+  // Normalize header keys to lowercase
+  const normHeaders: Record<string, any> = {};
+  for (const k of Object.keys(headers || {})) {
+    normHeaders[k.toLowerCase()] = headers[k];
+  }
+
+  const rawRemainingTokens = normHeaders['x-ratelimit-remaining-tokens'];
+  const remainingTokens =
+    rawRemainingTokens != null && !isNaN(parseFloat(String(rawRemainingTokens)))
+      ? parseFloat(String(rawRemainingTokens))
+      : null;
+
+  const resetTokensStr = normHeaders['x-ratelimit-reset-tokens'] ? String(normHeaders['x-ratelimit-reset-tokens']) : null;
+  const resetTokensMs = parseGroqResetDuration(resetTokensStr);
+
+  const retryAfterStr =
+    normHeaders['retry-after'] || normHeaders['retry-after-ms']
+      ? String(normHeaders['retry-after'] || normHeaders['retry-after-ms'])
+      : null;
+  const retryAfterMs = parseGroqResetDuration(retryAfterStr);
+
+  const resetRequestsStr = normHeaders['x-ratelimit-reset-requests'] ? String(normHeaders['x-ratelimit-reset-requests']) : null;
+  const resetRequestsMs = parseGroqResetDuration(resetRequestsStr);
+
+  let baseDelayMs: number;
+  let source: string;
+
+  // Rule 1: Remaining tokens <= 0 AND reset-tokens header available -> Token quota window is exhausted
+  if (remainingTokens !== null && remainingTokens <= 0 && resetTokensMs !== null && resetTokensMs > 0) {
+    baseDelayMs = resetTokensMs;
+    source = 'x-ratelimit-reset-tokens (TPM exhausted)';
+  } else if (resetTokensMs !== null && resetTokensMs > 0) {
+    baseDelayMs = Math.max(resetTokensMs, retryAfterMs || 0);
+    source = 'x-ratelimit-reset-tokens';
+  } else if (retryAfterMs !== null && retryAfterMs > 0) {
+    baseDelayMs = retryAfterMs;
+    source = 'retry-after';
+  } else if (resetRequestsMs !== null && resetRequestsMs > 0) {
+    baseDelayMs = resetRequestsMs;
+    source = 'x-ratelimit-reset-requests';
+  } else {
+    // Exponential backoff (~5s, ~10s, ~20s) plus bounded random jitter (0-1000ms)
+    baseDelayMs = Math.min(5000 * Math.pow(2, retries - 1), 30000);
+    source = 'exponential-backoff';
+  }
+
+  // Safety margin: Add +1500ms safety buffer so request doesn't hit server at exact boundary
+  const safetyMarginMs = 1500;
+  let finalDelayMs = baseDelayMs + safetyMarginMs;
+
+  // Floor: Minimum delay floor of 5,000ms for TPM exhaustion
+  if (remainingTokens !== null && remainingTokens <= 0) {
+    finalDelayMs = Math.max(finalDelayMs, 5000);
+  }
+
+  // Ceiling: Cap max delay at 60,000ms
+  finalDelayMs = Math.min(finalDelayMs, 60000);
+
+  return {
+    delayMs: finalDelayMs,
+    remainingTokens,
+    resetTokensStr,
+    resetTokensMs,
+    retryAfterMs,
+    source,
+  };
+}
+
 export interface LlmRequest {
   systemPrompt: string;
   userPrompt: string;
@@ -96,8 +229,8 @@ export class LlmClient {
         } else if (isRateLimit) {
           const retryAfterHeader = err.response?.headers?.['retry-after'] || err.response?.headers?.['retry-after-ms'];
           if (retryAfterHeader) {
-            const parsed = parseInt(String(retryAfterHeader), 10);
-            delay = !isNaN(parsed) && parsed > 0 ? (parsed > 1000 ? parsed : parsed * 1000) : 5000;
+            const parsed = parseGroqResetDuration(retryAfterHeader);
+            delay = parsed != null && parsed > 0 ? parsed : 5000;
           } else {
             // Exponential backoff (~5s, ~10s, ~20s) plus bounded random jitter (0-1000ms)
             const baseDelay = Math.min(5000 * Math.pow(2, retries - 1), 30000);
@@ -170,16 +303,11 @@ export class LlmClient {
         if (isTestEnv) {
           delay = 10;
         } else if (isRateLimit) {
-          const retryAfterHeader = err.response?.headers?.['retry-after'] || err.response?.headers?.['retry-after-ms'];
-          if (retryAfterHeader) {
-            const parsed = parseInt(String(retryAfterHeader), 10);
-            delay = !isNaN(parsed) && parsed > 0 ? (parsed > 1000 ? parsed : parsed * 1000) : 5000;
-          } else {
-            const baseDelay = Math.min(5000 * Math.pow(2, retries - 1), 30000);
-            const jitter = Math.floor(Math.random() * 1000);
-            delay = Math.min(baseDelay + jitter, 30000);
-          }
-          console.warn(`[GROQ 429 BACKOFF] Rate limit hit. Retrying attempt ${retries}/${maxRetries} in ${delay}ms...`);
+          const calc = calculateGroqRateLimitDelay(err.response?.headers, retries);
+          delay = calc.delayMs;
+          console.warn(
+            `[GROQ 429 BACKOFF] model=${model} attempt=${retries}/${maxRetries} remaining_tokens=${calc.remainingTokens ?? 'N/A'} reset_tokens=${calc.resetTokensStr ?? 'N/A'} retry_delay=${(delay / 1000).toFixed(1)}s source="${calc.source}"`
+          );
         } else {
           delay = Math.min(1000 * Math.pow(2, retries), 10000);
           console.warn(`[GROQ BACKOFF] Request failed (${err.message}). Retrying attempt ${retries}/${maxRetries} in ${delay}ms...`);
