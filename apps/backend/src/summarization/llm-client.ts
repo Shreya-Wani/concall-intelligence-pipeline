@@ -245,7 +245,7 @@ export class LlmClient {
   private async callFallback(userPrompt: string): Promise<string> {
     // Deterministic mock json generator for unit tests
     if (userPrompt.includes('TRANSCRIPT CHUNK') || userPrompt.includes('GROUP #')) {
-      // Map phase mock response
+      // Map / intermediate-reduce phase mock response
       return JSON.stringify({
         chunkIndex: 0,
         claims: [
@@ -259,10 +259,20 @@ export class LlmClient {
         segmentObservations: ['Cloud & Services grew 18.5% YoY.'],
         guidanceStatements: ['Targeting double-digit revenue growth in FY26.'],
         managementCommentary: ['Management reported strong demand across key verticals.'],
-        qaObservations: ['Analyst asked about EBITDA margin expansion.'],
+        qaObservations: [
+          {
+            asked_by: 'Jane Smith — Goldman Sachs',
+            question: 'Could you elaborate on the EBITDA margin expansion trajectory?',
+            answer: 'EBITDA margin expanded by +150 bps due to operational efficiencies and higher utilization.',
+            answer_continues_in_next_chunk: false,
+            evidence: 'Jane Smith — Goldman Sachs: Could you elaborate on the EBITDA margin expansion trajectory? Management: EBITDA margin expanded by +150 bps due to operational efficiencies and higher utilization.',
+            chunkIndex: 0,
+          },
+        ],
         risks: ['Global macroeconomic uncertainty.'],
       });
     }
+
 
     // Reduce phase mock response
     return JSON.stringify({
