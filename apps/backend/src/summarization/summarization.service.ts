@@ -119,6 +119,8 @@ export class SummarizationService {
       console.log(`[REDUCE] Reduce phase completed. Schema validation PASSED.`);
 
       // 4. Persist to summaries table
+      const dbSafeMarkdown = reduceResult.summaryMarkdown.replace(/₹/g, 'Rs ');
+
       const [insertedSummary] = await db
         .insert(summaries)
         .values({
@@ -126,7 +128,7 @@ export class SummarizationService {
           model: reduceResult.model,
           promptVersion: reduceResult.promptVersion,
           summaryJson: reduceResult.summaryJson,
-          summaryMarkdown: reduceResult.summaryMarkdown,
+          summaryMarkdown: dbSafeMarkdown,
         })
         .onConflictDoUpdate({
           target: summaries.transcriptId,
@@ -134,7 +136,7 @@ export class SummarizationService {
             model: reduceResult.model,
             promptVersion: reduceResult.promptVersion,
             summaryJson: reduceResult.summaryJson,
-            summaryMarkdown: reduceResult.summaryMarkdown,
+            summaryMarkdown: dbSafeMarkdown,
           },
         })
         .returning({ id: summaries.id });

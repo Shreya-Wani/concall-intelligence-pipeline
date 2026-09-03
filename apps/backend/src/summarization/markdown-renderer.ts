@@ -18,7 +18,7 @@ export function renderSummaryMarkdown(summary: SummaryContent): string {
   lines.push('');
 
   // 1. Key Takeaways (TL;DR)
-  lines.push('## 🚀 Key Takeaways (TL;DR)');
+  lines.push('## Key Takeaways (TL;DR)');
   if (summary.tldr.length > 0) {
     summary.tldr.forEach((item) => lines.push(`- ${item}`));
   } else {
@@ -27,7 +27,7 @@ export function renderSummaryMarkdown(summary: SummaryContent): string {
   lines.push('');
 
   // 2. Key Metrics Table
-  lines.push('## 📊 Key Metrics & Financial Figures');
+  lines.push('## Key Metrics & Financial Figures');
   if (summary.key_metrics.length > 0) {
     lines.push('| Metric | Value | Context / Details |');
     lines.push('| :--- | :--- | :--- |');
@@ -40,7 +40,7 @@ export function renderSummaryMarkdown(summary: SummaryContent): string {
   lines.push('');
 
   // 3. Management Commentary
-  lines.push('## 🎙️ Management Commentary');
+  lines.push('## Management Commentary');
   if (summary.management_commentary.length > 0) {
     summary.management_commentary.forEach((item) => lines.push(`- ${item}`));
   } else {
@@ -49,7 +49,7 @@ export function renderSummaryMarkdown(summary: SummaryContent): string {
   lines.push('');
 
   // 4. Guidance & Outlook
-  lines.push('## 🎯 Guidance & Future Outlook');
+  lines.push('## Guidance & Future Outlook');
   if (summary.guidance.length > 0) {
     summary.guidance.forEach((item) => lines.push(`- ${item}`));
   } else {
@@ -58,7 +58,7 @@ export function renderSummaryMarkdown(summary: SummaryContent): string {
   lines.push('');
 
   // 5. Segment Performance
-  lines.push('## 🧩 Segment Performance');
+  lines.push('## Segment Performance');
   if (summary.segment_performance.length > 0) {
     summary.segment_performance.forEach((seg) => {
       lines.push(`- **${seg.segment}:** ${seg.notes}`);
@@ -69,7 +69,7 @@ export function renderSummaryMarkdown(summary: SummaryContent): string {
   lines.push('');
 
   // 6. Notable Q&A
-  lines.push('## 🗣️ Notable Q&A');
+  lines.push('## Notable Q&A');
   if (summary.notable_qa.length > 0) {
     summary.notable_qa.forEach((qa, idx) => {
       lines.push(`### Q${idx + 1}: ${qa.question} _(Asked by: ${qa.asked_by})_`);
@@ -82,7 +82,7 @@ export function renderSummaryMarkdown(summary: SummaryContent): string {
   }
 
   // 7. Key Risks
-  lines.push('## ⚠️ Key Risks & Concerns');
+  lines.push('## Key Risks & Concerns');
   if (summary.risks.length > 0) {
     summary.risks.forEach((risk) => lines.push(`- ${risk}`));
   } else {

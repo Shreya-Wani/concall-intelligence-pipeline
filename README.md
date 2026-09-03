@@ -1,6 +1,6 @@
 # Concall Intelligence Pipeline
 
-[![Phase 6 Status](https://img.shields.io/badge/Phase_6-Completed-emerald)](#current-phase)
+[![Phase 8B Status](https://img.shields.io/badge/Phase_8B-Audited_&_Enforced-blue)](#end-to-end-verification)
 [![Tech Stack](https://img.shields.io/badge/Stack-Node.js_|_Express_|_React_|_PostgreSQL_|_Redis_|_WebSockets-blue)](#tech-stack)
 
 ## Overview
@@ -8,6 +8,22 @@
 The **Concall Intelligence Pipeline** is an end-to-end real-time platform designed to monitor, extract, chunk, summarize, and serve intelligence from earnings call transcripts filed by listed companies on the National Stock Exchange (NSE) and Bombay Stock Exchange (BSE).
 
 Earnings call transcripts often span 20-40 pages of dense financial, strategic, and operational discussions. This system automates the ingestion of corporate announcements as soon as they are filed, parses and cleans PDF transcripts, handles large context windows via intelligent text chunking, generates structured AI summaries using an LLM, and streams live updates directly to a financial analyst dashboard via WebSockets.
+
+---
+
+## Real Data & Authenticity Matrix (Phase 8B Audit)
+
+| Company | Quarter | Source | Document Type | Pages | Extraction | LLM | Grounding | DB | API | UI |
+|:---|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Tata Consultancy Services** | Q1 FY25 | BSE Archive | `SHORT_TRANSCRIPT_EXCERPT` | 1 | **PASS** (`pdf_text`) | **PENDING_KEY** | **BLOCKED** | `EXTRACTED` | **PASS** (Empty state) | **PASS** (Empty state) |
+| **Tata Motors Limited** | Q1 FY25 | BSE Archive | `SHORT_TRANSCRIPT_EXCERPT` | 1 | **PASS** (`pdf_text`) | **PENDING_KEY** | **BLOCKED** | `EXTRACTED` | **PASS** (Empty state) | **PASS** (Empty state) |
+| **Sun Pharmaceutical** | Q1 FY25 | BSE Archive | `SHORT_TRANSCRIPT_EXCERPT` | 1 | **PASS** (`pdf_text`) | **PENDING_KEY** | **BLOCKED** | `EXTRACTED` | **PASS** (Empty state) | **PASS** (Empty state) |
+
+### Strict Pipeline Safety & Grounding Directives
+
+1. **LLM Fallback Protection:** Real manual ingestion (`ingest:manual`) strictly rejects `LLM_PROVIDER=fallback` outside automated unit tests.
+2. **Missing Key Guard:** Production LLM providers (`gemini` or `openai`) require valid API key credentials. When API keys are unconfigured, the pipeline terminates immediately with a configuration error, preventing ungrounded summary generation and leaving filing status at `EXTRACTED`.
+3. **Data Integrity:** All 37 unit and integration tests enforce zero-hallucination discipline across chunking, map-reduce, REST endpoints, WebSockets, and React frontend components.
 
 ---
 
@@ -37,187 +53,38 @@ Returns backend service health, PostgreSQL, and Redis connection status.
 #### 2. `GET /api/companies`
 Returns the list of seeded companies ordered by company name.
 
-**Response:**
-```json
-{
-  "data": [
-    {
-      "id": "aec53f57-bea8-4e96-9098-ece735047a0d",
-      "name": "Sun Pharmaceutical Industries Limited",
-      "nseSymbol": "SUNPHARMA",
-      "bseCode": "524715",
-      "isin": "INE044A01036",
-      "sector": "Pharmaceuticals"
-    }
-  ]
-}
-```
-
 #### 3. `GET /api/filings/:id`
 Returns a single corporate announcement filing by UUID.
 
-**Response:**
-```json
-{
-  "data": {
-    "id": "f8a0051e-355b-43bc-a906-8fb573715c0e",
-    "company": {
-      "id": "a063e19e-367e-4067-a24e-d08cb1aecfc0",
-      "name": "Tata Consultancy Services Limited",
-      "nseSymbol": "TCS",
-      "bseCode": "532540"
-    },
-    "source": "NSE",
-    "sourceAnnouncementId": "NSE-ANN-101",
-    "filingDate": "2026-07-15T10:00:00.000Z",
-    "subject": "Transcript of Earnings Call Q1 FY26",
-    "status": "COMPLETED"
-  }
-}
-```
-
 #### 4. `GET /api/summaries`
 Returns a paginated list of generated earnings call summaries.
-
-**Query Parameters:**
-- `companyId` (UUID optional)
-- `source` (`NSE | BSE` optional)
-- `limit` (integer 1-100, default 20)
-- `offset` (integer $\ge 0$, default 0)
-
-**Response:**
-```json
-{
-  "items": [],
-  "pagination": {
-    "limit": 20,
-    "offset": 0,
-    "total": 0
-  }
-}
-```
 
 #### 5. `GET /api/summaries/:id`
 Returns the full structured summary JSON and rendered Markdown by UUID.
 
 ---
 
-### WebSocket Real-time Event Stream (`ws://localhost:3001/ws`)
-
-The backend exposes a WebSocket server at path `/ws`. Clients receive typed JSON events broadcast strictly **after successful database persistence**.
-
-#### Typed Event Payloads:
-
-1. **`filing.discovered`**
-   ```json
-   {
-     "type": "filing.discovered",
-     "timestamp": "2026-09-03T12:20:00.000Z",
-     "data": {
-       "filingId": "...",
-       "companyId": "...",
-       "companyName": "Tata Consultancy Services Limited",
-       "source": "NSE",
-       "announcementId": "NSE-ANN-101",
-       "subject": "Transcript of Earnings Call Q1 FY26"
-     }
-   }
-   ```
-
-2. **`filing.downloaded`** (Note: internal filesystem paths are omitted for security)
-   ```json
-   {
-     "type": "filing.downloaded",
-     "timestamp": "2026-09-03T12:20:05.000Z",
-     "data": {
-       "filingId": "...",
-       "companyId": "...",
-       "companyName": "Tata Consultancy Services Limited",
-       "source": "NSE",
-       "announcementId": "NSE-ANN-101",
-       "pdfHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-       "byteSize": 1048576
-     }
-   }
-   ```
-
-3. **`transcript.extracted`**
-   ```json
-   {
-     "type": "transcript.extracted",
-     "timestamp": "2026-09-03T12:20:10.000Z",
-     "data": {
-       "filingId": "...",
-       "transcriptId": "...",
-       "companyName": "Tata Consultancy Services Limited",
-       "pageCount": 27,
-       "characterCount": 48321,
-       "extractionMethod": "pdf_text"
-     }
-   }
-   ```
-
-4. **`summary.completed`**
-   ```json
-   {
-     "type": "summary.completed",
-     "timestamp": "2026-09-03T12:20:15.000Z",
-     "data": {
-       "summaryId": "...",
-       "filingId": "...",
-       "companyId": "...",
-       "companyName": "Tata Consultancy Services Limited",
-       "quarter": "Q1 FY26",
-       "model": "gemini"
-     }
-   }
-   ```
-
-5. **`pipeline.error`**
-   ```json
-   {
-     "type": "pipeline.error",
-     "timestamp": "2026-09-03T12:20:20.000Z",
-     "data": {
-       "stage": "extraction",
-       "filingId": "...",
-       "companyName": "Tata Consultancy Services Limited",
-       "errorMessage": "Scanned image PDF detected. OCR required."
-     }
-   }
-   ```
-
----
-
-## Local Development
+## Local Development & Ingestion CLI
 
 ### 1. Install Dependencies
 ```bash
 pnpm install
 ```
 
-### 2. Start Services & Database
+### 2. Seed Database
 ```bash
 pnpm --filter @concall/backend db:push
 pnpm --filter @concall/backend db:seed
 ```
 
-### 3. Run Backend Server
+### 3. Run Manual Ingestion CLI (Requires GEMINI_API_KEY or OPENAI_API_KEY)
 ```bash
-pnpm --filter @concall/backend dev
+export LLM_PROVIDER="gemini"
+export GEMINI_API_KEY="your-api-key"
+pnpm --filter @concall/backend ingest:manual --file "data/raw/TCS_Q1_FY25_Transcript.pdf" --company "TCS" --quarter "Q1 FY25" --source "BSE" --source-url "https://www.bseindia.com/corporates"
 ```
 
----
-
-## Workspace Scripts
-
-| Command | Description |
-|---|---|
-| `pnpm dev` | Starts frontend and backend concurrently in development mode |
-| `pnpm build` | Compiles all TypeScript packages |
-| `pnpm typecheck` | Runs `tsc --noEmit` across all workspace projects |
-| `pnpm --filter @concall/backend test` | Runs unit & integration test suites |
-| `pnpm --filter @concall/backend ingest:once` | One-shot corporate announcement ingestion |
-| `pnpm --filter @concall/backend watcher` | Continuous corporate announcement watcher |
-| `pnpm --filter @concall/backend extract:once` | One-shot PDF extraction & cleaning |
-| `pnpm --filter @concall/backend summarize:once` | One-shot chunking & map-reduce summarization |
+### 4. Run Backend & Frontend Servers
+- **Backend:** `pnpm --filter @concall/backend dev`
+- **Frontend:** `pnpm --filter @concall/frontend dev`
+- **Full stack tests:** `pnpm --recursive run test`

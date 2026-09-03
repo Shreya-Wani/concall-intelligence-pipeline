@@ -15,7 +15,8 @@
     "ingest:once": "tsx src/watcher/ingest-cli.ts",
     "watcher": "tsx src/watcher/watcher-cli.ts",
     "extract:once": "tsx src/extraction/extraction-cli.ts",
-    "summarize:once": "tsx src/summarization/summarize-cli.ts"
+    "summarize:once": "tsx src/summarization/summarize-cli.ts",
+    "ingest:manual": "tsx src/watcher/manual-ingest-cli.ts"
   },
   "dependencies": {
     "@concall/shared": "workspace:*",

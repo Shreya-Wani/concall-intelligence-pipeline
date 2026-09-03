@@ -7,6 +7,9 @@ import * as schema from './schema';
 export const queryClient = postgres(env.DATABASE_URL, {
   max: 10,
   connect_timeout: 5,
+  connection: {
+    client_encoding: 'utf8',
+  },
 });
 
 export const db = drizzle(queryClient, { schema: { ...schema, ...relations } });
