@@ -12,6 +12,14 @@ const envSchema = z.object({
   DATABASE_URL: z.string().default('postgres://postgres:postgres@localhost:5432/concall_db'),
   REDIS_URL: z.string().default('redis://localhost:6379'),
   FRONTEND_URL: z.string().default('http://localhost:5173'),
+
+  // Watcher Configuration
+  NSE_POLL_INTERVAL_MS: z.string().transform((val) => parseInt(val, 10)).default('30000'),
+  BSE_POLL_INTERVAL_MS: z.string().transform((val) => parseInt(val, 10)).default('30000'),
+  HTTP_TIMEOUT_MS: z.string().transform((val) => parseInt(val, 10)).default('15000'),
+  HTTP_MAX_RETRIES: z.string().transform((val) => parseInt(val, 10)).default('3'),
+  HTTP_INITIAL_RETRY_DELAY_MS: z.string().transform((val) => parseInt(val, 10)).default('1000'),
+  HTTP_MAX_RETRY_DELAY_MS: z.string().transform((val) => parseInt(val, 10)).default('10000'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
