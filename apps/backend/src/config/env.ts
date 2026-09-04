@@ -1,4 +1,4 @@
-﻿import dotenv from 'dotenv';
+import dotenv from 'dotenv';
 import path from 'path';
 import { z } from 'zod';
 
@@ -25,7 +25,7 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   GROQ_API_KEY: z.string().optional(),
-  GROQ_MODEL: z.string().default('openai/gpt-oss-120b'),
+  GROQ_MODEL: z.string().default('qwen/qwen3.8-27b'),
 
   // Pipeline feature flag — set to 'true' to start the watcher+orchestrator
   PIPELINE_ENABLED: z.string().transform((v) => v === 'true').default('false'),

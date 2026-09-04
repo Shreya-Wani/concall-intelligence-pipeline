@@ -216,7 +216,27 @@ JSON Output Schema:
 }
 `.trim();
 
-    const userPrompt = `EXTRACTED FACTS:\n${JSON.stringify(mergedMapResult, null, 2)}`;
+    // Compact merged facts so prompt payload stays well within LLM request limits (e.g. Groq 413 Payload Too Large)
+    const compactQA = (mergedMapResult.qaObservations || [])
+      .filter((q) => q.question && q.question.trim().length > 0)
+      .slice(0, 10)
+      .map((q) => ({
+        asked_by: q.asked_by ? q.asked_by.slice(0, 80) : null,
+        question: q.question.slice(0, 300),
+        answer: q.answer ? q.answer.slice(0, 400) : null,
+      }));
+
+    const compactMapResult = {
+      financialFigures: (mergedMapResult.financialFigures || []).slice(0, 25),
+      segmentObservations: (mergedMapResult.segmentObservations || []).slice(0, 15),
+      guidanceStatements: (mergedMapResult.guidanceStatements || []).slice(0, 15),
+      managementCommentary: (mergedMapResult.managementCommentary || []).slice(0, 20),
+      qaObservations: compactQA,
+      risks: (mergedMapResult.risks || []).slice(0, 15),
+      claims: (mergedMapResult.claims || []).slice(0, 15).map((c) => ({ claim: c.claim.slice(0, 200) })),
+    };
+
+    const userPrompt = `EXTRACTED FACTS:\n${JSON.stringify(compactMapResult, null, 2)}`;
 
     let summaryJson: SummaryContent;
     let attempts = 0;

@@ -124,10 +124,10 @@ export const Dashboard: React.FC = () => {
           )}
         </section>
 
-        {/* Main Content Grid: Summaries + Pipeline Status */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* B. Recent Summaries Section (2 Cols) */}
-          <section className="lg:col-span-2 space-y-4">
+        {/* Main Content: Summaries (3 across in 1 row) + Pipeline Activity Stream */}
+        <div className="space-y-8">
+          {/* B. Recent Summaries Section (3 Columns in 1 Row) */}
+          <section className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-extrabold text-blue-950 flex items-center">
                 <Sparkles className="w-5 h-5 mr-2 text-[#0078d4]" />
@@ -148,7 +148,7 @@ export const Dashboard: React.FC = () => {
                 message="The unattended watcher is actively monitoring official NSE & BSE corporate announcements. As earnings call transcripts are filed, real-time summaries will appear here automatically."
               />
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {summaries.map((summary) => (
                   <SummaryCard key={summary.id} summary={summary} />
                 ))}
@@ -156,8 +156,8 @@ export const Dashboard: React.FC = () => {
             )}
           </section>
 
-          {/* C. Real-time Pipeline Status (1 Col) */}
-          <section className="lg:col-span-1">
+          {/* C. Real-time Pipeline Status */}
+          <section className="w-full">
             <PipelineStatus events={events} />
           </section>
         </div>

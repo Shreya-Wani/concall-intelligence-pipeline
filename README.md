@@ -30,7 +30,7 @@ flowchart LR
 - **Frontend**: React 18, Vite, TypeScript, Tailwind CSS, Lucide Icons
 - **Backend API**: Node.js, Express, TypeScript, WebSockets (`ws`)
 - **Database & ORM**: PostgreSQL 16, Drizzle ORM
-- **AI Engine**: Groq (`openai/gpt-oss-120b`), Gemini 3.6 Flash, OpenAI GPT-4o-mini
+- **AI Engine**: Groq (`qwen/qwen3.8-27b` / `openai/gpt-oss-120b`), Gemini, OpenAI GPT-4o-mini
 - **Validation**: Zod schema validation
 - **Monorepo**: pnpm workspaces
 

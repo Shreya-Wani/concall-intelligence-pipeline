@@ -1,5 +1,11 @@
 import axios from 'axios';
+import dns from 'dns';
+import https from 'https';
 import { env } from '../config/env';
+
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (_) {}
 
 export const ANTI_HALLUCINATION_PROMPT = `
 CRITICAL INSTRUCTION & GROUNDING RULE:
@@ -146,14 +152,15 @@ export function calculateGroqRateLimitDelay(
   const safetyMarginMs = 1500;
   let finalDelayMs = baseDelayMs + safetyMarginMs;
 
-  // Floor: Minimum delay floor of 5,000ms if quota window exhaustion is indicated
+  // Floor: Minimum delay floor of 15,000ms if quota window exhaustion is indicated
   if (
     (remainingTokens !== null && remainingTokens <= 0) ||
     (remainingRequests !== null && remainingRequests <= 1) ||
     (resetRequestsMs !== null && resetRequestsMs > 0) ||
-    (resetTokensMs !== null && resetTokensMs > 0)
+    (resetTokensMs !== null && resetTokensMs > 0) ||
+    retries > 1
   ) {
-    finalDelayMs = Math.max(finalDelayMs, 5000);
+    finalDelayMs = Math.max(finalDelayMs, 15000);
   }
 
   // Ceiling: Cap max delay at 60,000ms
@@ -212,7 +219,7 @@ export class LlmClient {
       throw new Error('LLM_PROVIDER is configured to "gemini", but GEMINI_API_KEY environment variable is not set.');
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
 
     let retries = 0;
     const maxRetries = 3;
@@ -288,7 +295,7 @@ export class LlmClient {
     const url = 'https://api.groq.com/openai/v1/chat/completions';
 
     let retries = 0;
-    const maxRetries = env.HTTP_MAX_RETRIES || 3;
+    const maxRetries = 10;
 
     while (retries <= maxRetries) {
       try {
@@ -309,6 +316,11 @@ export class LlmClient {
               'Content-Type': 'application/json',
             },
             timeout: env.HTTP_TIMEOUT_MS || 30000,
+            httpsAgent: new https.Agent({
+              lookup: (hostname, options, callback) => {
+                dns.lookup(hostname, { ...options, family: 4 }, callback);
+              },
+            }),
           }
         );
 
