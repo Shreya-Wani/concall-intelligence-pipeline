@@ -99,6 +99,49 @@ pnpm build
 
 ---
 
+## ✨ Output Schema & Key Enhancements
+
+The JSON summary matches and enriches the Finosauras assignment schema:
+
+```json
+{
+  "company": "Infosys Limited",
+  "scrip_code": "500209",
+  "nse_symbol": "INFY",
+  "quarter": "Q1 FY25",
+  "quarter_inferred": false,
+  "call_date": "2024-07-18",
+  "source": "NSE",
+  "source_url": "https://...",
+  "tldr": ["Key bullet points..."],
+  "management_commentary": ["Management remarks..."],
+  "management_tone": "Cautiously optimistic on BFSI demand recovery with disciplined margin execution.",
+  "guidance": ["Forward looking statements..."],
+  "segment_performance": [
+    { "segment": "Financial Services", "notes": "Grew 7.9%..." }
+  ],
+  "key_metrics": [
+    { "metric": "Revenue", "value": "$4.7 bn", "context": "Up 3.6% QoQ" }
+  ],
+  "notable_qa": [
+    {
+      "asked_by": "Keith Bachman — BMO",
+      "question": "What are the drivers behind BFSI recovery?",
+      "answer": "Salil Parekh noted positive volume growth in US Financial Services..."
+    }
+  ],
+  "risks": ["Forex volatility..."],
+  "grounding": {
+    "numericPrecision": 1.0,
+    "numbersChecked": 42,
+    "numbersVerified": 42,
+    "unverifiable": 0
+  }
+}
+```
+
+---
+
 ## ⚠️ Known Limitations & Future Roadmap
 
 ### Known Limitations
@@ -108,6 +151,7 @@ pnpm build
 ### Future Roadmap
 1. **Tesseract OCR Integration**: Automatic OCR fallback for image-only scanned PDFs.
 2. **Semantic Search (RAG)**: `pgvector` index for natural language Q&A search across historical calls.
-on when companies file audio recordings before PDF release.
+3. **Whisper Audio Pipeline**: Automatic audio transcription when companies file audio recordings before PDF release.
+
 
 
