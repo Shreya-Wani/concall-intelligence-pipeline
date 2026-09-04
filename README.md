@@ -1,51 +1,36 @@
 # Concall Intelligence Pipeline 🚀
 
-An automated, real-time platform that monitors earnings call transcripts from the **National Stock Exchange (NSE)** and **Bombay Stock Exchange (BSE)**, extracts key financial data, generates grounded AI summaries, and streams them live via WebSockets and a React dashboard.
+An end-to-end, event-driven platform that monitors corporate filings from the **National Stock Exchange (NSE)** and **Bombay Stock Exchange (BSE)**, extracts PDF transcripts, generates grounded AI summaries via Map-Reduce, and streams real-time updates via WebSockets to a React dashboard.
 
 ---
 
-## 📌 Problem & Solution
-
-### The Problem
-Listed Indian companies publish quarterly earnings call transcripts (*concalls*) as 20–40+ page PDFs on NSE and BSE. These transcripts carry invaluable qualitative insights - management guidance, margin outlook, order books, and analyst Q&A - but reading them manually at scale is time-consuming and inefficient.
-
-### The Solution
-A real-time, unattended pipeline that:
-1. **Watches**: Automatically detects when a concall transcript is filed on NSE/BSE.
-2. **Extracts**: Parses PDF attachments into clean, readable text.
-3. **Summarizes**: Runs a 2-stage AI Map-Reduce engine to produce grounded JSON + Markdown summaries without truncation or hallucination.
-4. **Streams & Serves**: Emits live WebSocket events and displays real-time summaries on a modern React dashboard.
-
----
-
-## 🏗️ Architecture & Pipeline Flow
+## 📌 Architecture & How It Works
 
 ```mermaid
 flowchart LR
-    A["📡 1. Watch & Ingest<br/><i>(NSE & BSE Feeds)</i>"] --> B["📄 2. Extract Text<br/><i>(Clean PDF to Text)</i>"]
-    B --> C["🤖 3. AI Summarize<br/><i>(Groq Map-Reduce)</i>"]
-    C --> D["⚡ 4. Serve & Stream<br/><i>(REST, WS & React UI)</i>"]
+    A["📡 1. Watch & Ingest<br/><i>(NSE & BSE Feeds)</i>"] --> B["📄 2. Extract Text<br/><i>(Line-Preserved PDF Parser)</i>"]
+    B --> C["🤖 3. AI Summarize<br/><i>(Map & Merge Engine)</i>"]
+    C --> D["⚡ 4. Serve & Stream<br/><i>(REST API, WebSockets & UI)</i>"]
 ```
 
-### End-to-End Pipeline Stages
-
-| Stage | Process | Description & Key Output |
-| :---: | :---| :---|
-| **1** | **Watch & Ingest** | Polls NSE/BSE corporate feeds for transcript disclosures and downloads raw PDFs to `data/raw/`. |
-| **2** | **Extract Text** | Parses text layer, removes headers/footers/page numbers, and outputs clean text to `data/extracted/`. |
-| **3** | **AI Summarize** | Runs chunk-level **MAP** extractions and adaptive **REDUCE** to produce grounded JSON + Markdown summaries in `data/summaries/`. |
-| **4** | **Serve & Stream** | Stores summaries in PostgreSQL, emits live `summary.completed` WebSocket events, and updates the React dashboard. |
-
+### Event-Driven Pipeline Flow
+1. **Watch & Ingest**: Background watcher polls NSE & BSE APIs every minute for transcript announcements. Discovered filings are persisted as `DISCOVERED` and downloaded streamingly to `data/raw/` with SHA-256 deduplication.
+2. **Extract Text**: Line-reconstructing parser (`pdfjs-dist` y-coordinate grouping) strips repeated headers/footers and page numbers. Cleaned text is saved to `data/extracted/` as `EXTRACTED`.
+3. **AI Summarize**: 
+   - **MAP Phase**: Extracts claims, guidance, management commentary, risks, and Q&A turns per chunk.
+   - **Merge Phase**: Deterministically merges facts and stitches split Q&A turns across chunk boundaries without extra LLM round-trips.
+   - **REDUCE Phase**: Generates structured JSON & Markdown summaries.
+   - **Grounding Check**: Verifies numeric tokens against transcript text and records precision in `summaryJson.grounding`.
+4. **Serve & Stream**: In-process EventBus notifies `ws/bridge.ts`, broadcasting `summary.completed` to connected WebSocket clients and serving REST API endpoints.
 
 ---
 
 ## 💻 Tech Stack
 
-- **Frontend**: React 18, Vite, TypeScript, Tailwind CSS (White & Blue Theme), Lucide Icons
+- **Frontend**: React 18, Vite, TypeScript, Tailwind CSS, Lucide Icons
 - **Backend API**: Node.js, Express, TypeScript, WebSockets (`ws`)
 - **Database & ORM**: PostgreSQL 16, Drizzle ORM
-- **Caching & Queues**: Redis 7, BullMQ
-- **AI Engine**: Groq (`openai/gpt-oss-120b`), Axios with TPM/RPM adaptive rate-limit backoff
+- **AI Engine**: Groq (`openai/gpt-oss-120b`), Gemini 3.6 Flash, OpenAI GPT-4o-mini
 - **Validation**: Zod schema validation
 - **Monorepo**: pnpm workspaces
 
@@ -56,37 +41,27 @@ flowchart LR
 ### Prerequisites
 - Node.js >= 18
 - pnpm >= 9
-- PostgreSQL & Redis
+- PostgreSQL (running on port 5432 or port 5433)
 
-### Step 1: Install Dependencies
+### Step 1: Install Dependencies & Build Shared Package
 ```bash
 pnpm install
+pnpm --filter @concall/shared build
 ```
 
-### Step 2: Setup Database & Seed Data
+### Step 2: Push Database Schema & Seed Companies
 ```bash
 pnpm --filter @concall/backend run db:push
 pnpm --filter @concall/backend run db:seed
 ```
 
-### Step 3: Start Services (3 Terminal Tabs)
-
-**Terminal 1 (PostgreSQL)**:
-```powershell
-pnpm db:start
-```
-
-**Terminal 2 (Redis)**:
-```powershell
-pnpm redis:start
-```
-
-**Terminal 3 (Backend + WebSockets + UI)**:
-```powershell
+### Step 3: Launch Full Pipeline & UI
+```bash
 pnpm dev
 ```
-
-Open **`http://localhost:5173/`** (or `http://localhost:5174/`) in your browser.
+- **REST API**: `http://localhost:3001`
+- **WebSocket Gateway**: `ws://localhost:3001/ws`
+- **React UI**: `http://localhost:5173` (or `http://localhost:5174`)
 
 ---
 
@@ -108,45 +83,18 @@ Open **`http://localhost:5173/`** (or `http://localhost:5174/`) in your browser.
 
 ---
 
-## ✨ Output Schema & Key Enhancements
-
-The structured summary complies with and enriches the standard JSON schema:
-- **`management_tone`**: Captures executive tone (e.g. *Cautiously optimistic on BFSI recovery with disciplined margin execution*).
-- **Grounded `notable_qa`**: Preserves analyst names, firm names, questions, and non-fabricated management answers.
-- **Strict Number Preservation**: Financial figures (₹, $, %, bps) remain exact and unedited.
-
-```json
-{
-  "company": "Infosys Limited",
-  "scrip_code": "500209",
-  "nse_symbol": "INFY",
-  "quarter": "Q1 FY25",
-  "call_date": "2024-07-18",
-  "source": "NSE",
-  "source_url": "https://...",
-  "tldr": ["Key takeaways..."],
-  "management_commentary": ["Executive remarks..."],
-  "management_tone": "Cautiously optimistic on BFSI demand recovery with disciplined margin execution.",
-  "guidance": ["Forward looking statements..."],
-  "segment_performance": [{ "segment": "Financial Services", "notes": "Grew 7.9%..." }],
-  "key_metrics": [{ "metric": "Revenue", "value": "$4.7 bn", "context": "Up 3.6% QoQ" }],
-  "notable_qa": [{ "asked_by": "Keith Bachman — BMO", "question": "...", "answer": "..." }],
-  "risks": ["Forex volatility..."]
-}
-```
-
----
-
 ## 🧪 Verification & Testing
 
-Run workspace verification commands:
+Run deterministic unit test suite and full workspace build:
+
 ```bash
 pnpm typecheck
-pnpm --recursive run test
+pnpm --filter @concall/backend run test
 pnpm build
 ```
-- **Unit Tests**: 93/93 passing
-- **Typecheck**: 0 errors
+
+- **Unit Tests**: 20/20 passing (Deterministic pipeline tests, zero network/mock dependency)
+- **Typecheck**: 0 errors across `@concall/shared`, `@concall/backend`, `@concall/frontend`
 - **Build**: Clean production build
 
 ---
@@ -154,12 +102,12 @@ pnpm build
 ## ⚠️ Known Limitations & Future Roadmap
 
 ### Known Limitations
-- **Groq Free-Tier Rate Limits**: Free API tier enforces Tokens-Per-Minute (TPM) limits (handled via adaptive exponential backoff).
-- **Scanned PDFs**: Image-only scanned transcripts require an external OCR library (e.g. Tesseract).
+1. **Free-Tier Rate Limits**: Free Groq API limits (TPM/RPM) are managed with exponential backoff.
+2. **Scanned PDFs**: Scanned image PDFs generate `OCR_REQUIRED` status until Tesseract OCR integration.
 
-### What I'd Do With More Time
-1. **Tesseract OCR Fallback Integration**: OCR fallback for image-only scanned PDFs.
-2. **Vector RAG Search**: `pgvector` integration for semantic Q&A search across historical calls.
-3. **Whisper Audio Pipeline**: Automatic audio transcription when companies file audio recordings before PDF release.
+### Future Roadmap
+1. **Tesseract OCR Integration**: Automatic OCR fallback for image-only scanned PDFs.
+2. **Semantic Search (RAG)**: `pgvector` index for natural language Q&A search across historical calls.
+on when companies file audio recordings before PDF release.
 
 

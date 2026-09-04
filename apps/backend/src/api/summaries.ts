@@ -16,29 +16,24 @@ const summaryQuerySchema = z.object({
 
 const uuidParamSchema = z.string().uuid();
 
-// GET /api/summaries
 router.get('/summaries', async (req, res, next) => {
   try {
     const parseResult = summaryQuerySchema.safeParse(req.query);
     if (!parseResult.success) {
       return res.status(400).json({
-        error: {
-          code: 'BAD_REQUEST',
-          message: 'Invalid query parameters',
-          details: parseResult.error.format(),
-        },
+        error: { code: 'BAD_REQUEST', message: 'Invalid query parameters', details: parseResult.error.format() },
       });
     }
 
-    const { companyId, source, limit, offset } = parseResult.data;
+    const { companyId, source, quarter, limit, offset } = parseResult.data;
 
     const conditions = [];
     if (companyId) conditions.push(eq(companies.id, companyId));
     if (source) conditions.push(eq(filings.source, source));
+    if (quarter) conditions.push(eq(filings.quarter, quarter));
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    // Get total count
     const countRes = await db
       .select({ total: count() })
       .from(summaries)
@@ -49,7 +44,6 @@ router.get('/summaries', async (req, res, next) => {
 
     const total = countRes[0]?.total || 0;
 
-    // Get paginated items
     const rows = await db
       .select({
         summary: summaries,
@@ -75,10 +69,13 @@ router.get('/summaries', async (req, res, next) => {
           name: r.company.name,
           nseSymbol: r.company.nseSymbol,
           bseCode: r.company.bseCode,
+          sector: r.company.sector,
         },
-        quarter: summaryContent?.quarter || 'Q1 FY26',
-        callDate: summaryContent?.call_date || null,
+        quarter: summaryContent?.quarter ?? r.filing.quarter ?? null,
+        quarterInferred: summaryContent?.quarter_inferred ?? false,
+        callDate: summaryContent?.call_date ?? null,
         source: r.filing.source,
+        sourceUrl: r.filing.sourceUrl,
         model: r.summary.model,
         createdAt: r.summary.createdAt,
         summaryJson: r.summary.summaryJson,
@@ -86,41 +83,23 @@ router.get('/summaries', async (req, res, next) => {
       };
     });
 
-    return res.json({
-      items,
-      pagination: {
-        limit,
-        offset,
-        total,
-      },
-    });
+    return res.json({ items, pagination: { limit, offset, total } });
   } catch (err) {
     return next(err);
   }
 });
 
-// GET /api/summaries/:id
 router.get('/summaries/:id', async (req, res, next) => {
   try {
     const parseResult = uuidParamSchema.safeParse(req.params.id);
     if (!parseResult.success) {
-      return res.status(404).json({
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Summary not found',
-        },
-      });
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Summary not found' } });
     }
 
     const summaryId = parseResult.data;
 
     const rows = await db
-      .select({
-        summary: summaries,
-        transcript: transcripts,
-        filing: filings,
-        company: companies,
-      })
+      .select({ summary: summaries, transcript: transcripts, filing: filings, company: companies })
       .from(summaries)
       .innerJoin(transcripts, eq(summaries.transcriptId, transcripts.id))
       .innerJoin(filings, eq(transcripts.filingId, filings.id))
@@ -129,12 +108,7 @@ router.get('/summaries/:id', async (req, res, next) => {
       .limit(1);
 
     if (rows.length === 0) {
-      return res.status(404).json({
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Summary not found',
-        },
-      });
+      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Summary not found' } });
     }
 
     const r = rows[0];
@@ -151,8 +125,9 @@ router.get('/summaries/:id', async (req, res, next) => {
           isin: r.company.isin,
           sector: r.company.sector,
         },
-        quarter: summaryContent?.quarter || 'Q1 FY26',
-        callDate: summaryContent?.call_date || null,
+        quarter: summaryContent?.quarter ?? r.filing.quarter ?? null,
+        quarterInferred: summaryContent?.quarter_inferred ?? false,
+        callDate: summaryContent?.call_date ?? null,
         source: r.filing.source,
         sourceAnnouncementId: r.filing.sourceAnnouncementId,
         sourceUrl: r.filing.sourceUrl,

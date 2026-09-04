@@ -55,18 +55,10 @@ export class WatcherService {
         } catch (err: any) {
           stats.failed++;
           console.error('[WATCHER] Error processing individual NSE filing:', err.message);
-          wsManager.broadcast('pipeline.error', {
-            stage: 'watcher',
-            errorMessage: `NSE announcement processing error: ${err.message}`,
-          });
         }
       }
     } catch (err: any) {
-      console.error('[WATCHER] NSE polling encountered an error (isolated):', err.message);
-      wsManager.broadcast('pipeline.error', {
-        stage: 'watcher',
-        errorMessage: `NSE polling error: ${err.message}`,
-      });
+      console.error('[WATCHER] NSE polling error:', err.message);
     }
 
     return stats;
@@ -99,42 +91,28 @@ export class WatcherService {
         } catch (err: any) {
           stats.failed++;
           console.error('[WATCHER] Error processing individual BSE filing:', err.message);
-          wsManager.broadcast('pipeline.error', {
-            stage: 'watcher',
-            errorMessage: `BSE announcement processing error: ${err.message}`,
-          });
         }
       }
     } catch (err: any) {
-      console.error('[WATCHER] BSE polling encountered an error (isolated):', err.message);
-      wsManager.broadcast('pipeline.error', {
-        stage: 'watcher',
-        errorMessage: `BSE polling error: ${err.message}`,
-      });
+      console.error('[WATCHER] BSE polling error:', err.message);
     }
 
     return stats;
   }
 
   private async processFiling(filing: NormalizedFiling, stats: IngestStats): Promise<void> {
-    // 1. Level 1 Deduplication (source + sourceAnnouncementId)
     const isL1Dup = await isLevel1Duplicate(filing.source, filing.sourceAnnouncementId);
     if (isL1Dup) {
       stats.level1Duplicates++;
-      console.log(`[DEDUP] Skipping Level 1 duplicate (${filing.source} ID: ${filing.sourceAnnouncementId})`);
       return;
     }
 
-    // 2. Transcript Relevance Filtering
     if (!isTranscriptFiling(filing.subject, filing.eventType)) {
-      console.log(`[FILTER] Skipped non-transcript filing: "${filing.subject?.slice(0, 60)}"`);
       return;
     }
     stats.transcriptFiltered++;
-    console.log(`[FILTER] Concall transcript detected: "${filing.subject?.slice(0, 70)}"`);
 
-    // 3. Company Matching
-    const matchedCompany = matchSeededCompany({
+    const matchedCompany = await matchSeededCompany({
       nseSymbol: filing.nseSymbol,
       bseCode: filing.bseCode,
       isin: filing.isin,
@@ -142,27 +120,22 @@ export class WatcherService {
     });
 
     if (!matchedCompany) {
-      console.log(`[MATCH] Unmatched company skipped: "${filing.companyName}"`);
       return;
     }
     stats.matchedCompany++;
-    console.log(`[MATCH] Matched to seeded company: ${matchedCompany.name} (${matchedCompany.nseSymbol})`);
 
-    // Query Company ID from PostgreSQL
     const companyRecord = await db
       .select({ id: companies.id })
       .from(companies)
-      .where(eq(companies.nseSymbol, matchedCompany.nseSymbol))
+      .where(eq(companies.name, matchedCompany.name))
       .limit(1);
 
     if (companyRecord.length === 0) {
-      console.warn(`[DB] Seeded company record not found in PostgreSQL DB for ${matchedCompany.nseSymbol}`);
       return;
     }
 
     const companyId = companyRecord[0].id;
 
-    // 4. Persistence: Insert filing with status = 'DISCOVERED'
     const [insertedFiling] = await db
       .insert(filings)
       .values({
@@ -178,46 +151,28 @@ export class WatcherService {
       })
       .returning({ id: filings.id });
 
-    console.log(`[DB] Inserted filing ${insertedFiling.id} with status DISCOVERED`);
-
-    // Broadcast filing.discovered AFTER DB insertion
-    wsManager.broadcast('filing.discovered', {
-      filingId: insertedFiling.id,
-      companyId,
-      companyName: matchedCompany.name,
-      source: filing.source,
-      announcementId: filing.sourceAnnouncementId,
-      subject: filing.subject || 'Corporate Announcement',
-      filingDate: filing.filingDate.toISOString(),
-    });
-
     if (!filing.pdfUrl) {
-      console.log(`[DOWNLOAD] No PDF URL present for filing ${insertedFiling.id}`);
       return;
     }
 
-    // 5. Status Transition -> DOWNLOADING
     await db.update(filings).set({ status: 'DOWNLOADING' }).where(eq(filings.id, insertedFiling.id));
 
     try {
       const targetFilename = generateDeterministicFilename(
         filing.source,
-        matchedCompany.nseSymbol,
+        matchedCompany.nseSymbol || matchedCompany.bseCode || 'COMPANY',
         filing.filingDate,
         filing.sourceAnnouncementId
       );
 
-      // Download PDF and compute SHA-256 hash
       const downloadRes = await downloadPdfStream(filing.pdfUrl, targetFilename);
 
-      // 6. Level 2 Deduplication Check (PDF SHA-256 Hash)
       const existingPdfMatch = await findFilingByPdfHash(downloadRes.pdfHash);
       if (existingPdfMatch && existingPdfMatch.id !== insertedFiling.id) {
         stats.level2Duplicates++;
-        console.log(`[DEDUP] Level 2 duplicate PDF SHA-256 match found (${downloadRes.pdfHash.slice(0, 10)}...). Preserving filing record.`);
+        console.log(`[DEDUP] Level 2 duplicate PDF SHA-256 match found (${downloadRes.pdfHash.slice(0, 10)}...).`);
       }
 
-      // 7. Status Transition -> DOWNLOADED
       await db
         .update(filings)
         .set({
@@ -228,9 +183,7 @@ export class WatcherService {
         .where(eq(filings.id, insertedFiling.id));
 
       stats.downloaded++;
-      console.log(`[DB] Filing ${insertedFiling.id} status updated to DOWNLOADED`);
 
-      // Broadcast filing.downloaded AFTER DB persistence (no localPath in payload)
       wsManager.broadcast('filing.downloaded', {
         filingId: insertedFiling.id,
         companyId,
@@ -244,13 +197,6 @@ export class WatcherService {
       stats.failed++;
       console.error(`[DOWNLOAD] Failed downloading filing ${insertedFiling.id}:`, err.message);
       await db.update(filings).set({ status: 'FAILED' }).where(eq(filings.id, insertedFiling.id));
-
-      wsManager.broadcast('pipeline.error', {
-        stage: 'downloader',
-        filingId: insertedFiling.id,
-        companyName: matchedCompany.name,
-        errorMessage: `PDF download error: ${err.message}`,
-      });
     }
   }
 }

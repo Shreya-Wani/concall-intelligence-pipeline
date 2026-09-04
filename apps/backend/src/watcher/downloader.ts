@@ -1,4 +1,4 @@
-import createCryptoHash from 'crypto';
+﻿import createCryptoHash from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
@@ -40,8 +40,8 @@ export async function downloadPdfStream(
       const response = await axios.get(pdfUrl, {
         responseType: 'stream',
         timeout: env.HTTP_TIMEOUT_MS,
-        httpAgent: new http.Agent({ insecureHTTPParser: true } as http.AgentOptions),
-        httpsAgent: new https.Agent({ insecureHTTPParser: true, rejectUnauthorized: false } as https.AgentOptions),
+        // Certificate validation enabled — both exchanges have valid certs
+        httpsAgent: new https.Agent({ rejectUnauthorized: true }),
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -53,12 +53,8 @@ export async function downloadPdfStream(
         throw new Error(`HTTP status ${response.status} downloading PDF`);
       }
 
-      const contentTypeHeader = response.headers['content-type'];
-      const contentType = typeof contentTypeHeader === 'string' ? contentTypeHeader : 'application/pdf';
-
       const hashStream = createCryptoHash.createHash('sha256');
       const fileStream = fs.createWriteStream(targetPath);
-
       let byteSize = 0;
 
       await new Promise<void>((resolve, reject) => {
@@ -67,40 +63,28 @@ export async function downloadPdfStream(
           hashStream.update(chunk);
           fileStream.write(chunk);
         });
-
-        response.data.on('end', () => {
-          fileStream.end();
-          resolve();
-        });
-
-        response.data.on('error', (err: Error) => {
-          fileStream.destroy();
-          reject(err);
-        });
-
+        response.data.on('end', () => { fileStream.end(); resolve(); });
+        response.data.on('error', (err: Error) => { fileStream.destroy(); reject(err); });
         fileStream.on('error', (err) => reject(err));
       });
 
       const pdfHash = hashStream.digest('hex');
-
-      console.log(`[DOWNLOAD] Successfully saved ${targetFilename} (${byteSize} bytes, SHA-256: ${pdfHash.slice(0, 10)}...)`);
+      console.log(`[DOWNLOAD] Saved ${targetFilename} (${byteSize} bytes, SHA-256: ${pdfHash.slice(0, 10)}...)`);
 
       return {
-        localPath: targetPath,
+        localPath: targetPath,  // filesystem path — stored in a separate column, never overwrites sourceUrl
         pdfHash,
         byteSize,
-        contentType,
+        contentType: 'application/pdf',
       };
     } catch (err: any) {
       if (fs.existsSync(targetPath)) {
-        try {
-          fs.unlinkSync(targetPath);
-        } catch (_) {}
+        try { fs.unlinkSync(targetPath); } catch (_) {}
       }
 
       retries++;
       if (retries > env.HTTP_MAX_RETRIES) {
-        console.error(`[DOWNLOAD] Failed downloading PDF after max retries:`, err.message);
+        console.error(`[DOWNLOAD] Failed after ${env.HTTP_MAX_RETRIES} retries:`, err.message);
         throw err;
       }
       const delay = Math.min(

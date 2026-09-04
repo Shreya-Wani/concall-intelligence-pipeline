@@ -1,11 +1,11 @@
 import http from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
-import { PipelineEvent, PipelineEventMap, PipelineEventType } from './types';
 
 export class WebSocketManager {
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
   private pingInterval: NodeJS.Timeout | null = null;
+  private connectHandlers: Array<(ws: WebSocket) => void> = [];
 
   public init(server: http.Server, path: string = '/ws'): void {
     if (this.wss) return;
@@ -16,7 +16,6 @@ export class WebSocketManager {
       console.log(`[WS] Client connected from ${req.socket.remoteAddress}`);
       this.clients.add(ws);
 
-      // Send initial welcome frame
       ws.send(
         JSON.stringify({
           type: 'connection.established',
@@ -25,41 +24,27 @@ export class WebSocketManager {
         })
       );
 
-      ws.on('pong', () => {
-        (ws as any).isAlive = true;
-      });
+      for (const handler of this.connectHandlers) {
+        try { handler(ws); } catch (_) {}
+      }
 
-      ws.on('close', () => {
-        this.clients.delete(ws);
-        console.log('[WS] Client disconnected');
-      });
-
-      ws.on('error', (err) => {
-        console.warn('[WS] Client error:', err.message);
-        this.clients.delete(ws);
-      });
+      ws.on('pong', () => { (ws as any).isAlive = true; });
+      ws.on('close', () => { this.clients.delete(ws); console.log('[WS] Client disconnected'); });
+      ws.on('error', (err) => { console.warn('[WS] Client error:', err.message); this.clients.delete(ws); });
     });
 
-    // Ping-pong heartbeat every 30 seconds to clean stale connections
     this.pingInterval = setInterval(() => {
       if (!this.wss) return;
       this.clients.forEach((ws) => {
-        if ((ws as any).isAlive === false) {
-          this.clients.delete(ws);
-          return ws.terminate();
-        }
+        if ((ws as any).isAlive === false) { this.clients.delete(ws); return ws.terminate(); }
         (ws as any).isAlive = false;
         ws.ping();
       });
     }, 30000);
-    // Unref interval so it does not block Node process exit
     this.pingInterval.unref();
 
     this.wss.on('close', () => {
-      if (this.pingInterval) {
-        clearInterval(this.pingInterval);
-        this.pingInterval = null;
-      }
+      if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
     });
 
     console.log(`[WS] WebSocket server initialized on path ${path}`);
@@ -69,41 +54,31 @@ export class WebSocketManager {
     return this.clients.size;
   }
 
-  public broadcast<T extends PipelineEventType>(type: T, data: PipelineEventMap[T]): PipelineEvent<T> {
-    const event: PipelineEvent<T> = {
-      type,
-      timestamp: new Date().toISOString(),
-      data,
-    };
+  public onConnect(handler: (ws: WebSocket) => void): void {
+    this.connectHandlers.push(handler);
+  }
 
-    const payload = JSON.stringify(event);
-
+  public broadcastRaw(type: string, data: unknown): void {
+    const payload = JSON.stringify({ type, timestamp: new Date().toISOString(), data });
     this.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        try {
-          client.send(payload);
-        } catch (err: any) {
-          console.warn('[WS] Error broadcasting event to client:', err.message);
+        try { client.send(payload); } catch (err: any) {
+          console.warn('[WS] Error sending to client:', err.message);
           this.clients.delete(client);
         }
       }
     });
+  }
 
-    return event;
+  public broadcast(type: string, data: unknown): void {
+    this.broadcastRaw(type, data);
   }
 
   public close(): Promise<void> {
     return new Promise((resolve) => {
-      if (this.pingInterval) {
-        clearInterval(this.pingInterval);
-        this.pingInterval = null;
-      }
+      if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
       if (!this.wss) return resolve();
-      this.wss.close(() => {
-        this.wss = null;
-        this.clients.clear();
-        resolve();
-      });
+      this.wss.close(() => { this.wss = null; this.clients.clear(); resolve(); });
     });
   }
 }

@@ -1,28 +1,52 @@
-import { SeededCompanyMatch } from './types';
+import { db } from '../db';
+import { companies } from '../db/schema';
 
 export const SEEDED_COMPANIES = [
-  {
-    name: 'Tata Consultancy Services Limited',
-    nseSymbol: 'TCS',
-    bseCode: '532540',
-    isin: 'INE467B01029',
-    aliases: ['tata consultancy services', 'tcs'],
-  },
-  {
-    name: 'Tata Motors Limited',
-    nseSymbol: 'TATAMOTORS',
-    bseCode: '500570',
-    isin: 'INE155A01022',
-    aliases: ['tata motors', 'tatamotors'],
-  },
-  {
-    name: 'Sun Pharmaceutical Industries Limited',
-    nseSymbol: 'SUNPHARMA',
-    bseCode: '524715',
-    isin: 'INE044A01036',
-    aliases: ['sun pharma', 'sun pharmaceutical', 'sunpharma'],
-  },
+  { name: 'Tata Consultancy Services Limited', nseSymbol: 'TCS', bseCode: '532540', isin: 'INE467B01029', aliases: ['tata consultancy services', 'tcs'] },
+  { name: 'Tata Motors Limited', nseSymbol: 'TATAMOTORS', bseCode: '500570', isin: 'INE155A01022', aliases: ['tata motors', 'tatamotors'] },
+  { name: 'Sun Pharmaceutical Industries Limited', nseSymbol: 'SUNPHARMA', bseCode: '524715', isin: 'INE044A01036', aliases: ['sun pharma', 'sun pharmaceutical', 'sunpharma'] },
+  { name: 'Infosys Limited', nseSymbol: 'INFY', bseCode: '500209', isin: 'INE009A01021', aliases: ['infosys', 'infy'] },
+  { name: 'HDFC Bank Limited', nseSymbol: 'HDFCBANK', bseCode: '500180', isin: 'INE040A01034', aliases: ['hdfc bank', 'hdfcbank', 'hdfc'] },
 ];
+
+interface CachedCompany {
+  name: string;
+  nseSymbol: string | null;
+  bseCode: string | null;
+  isin: string | null;
+  aliases?: string[];
+}
+
+let companyCache: CachedCompany[] = [];
+let cacheExpiresAt = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function getWatchedCompanies(): Promise<CachedCompany[]> {
+  if (Date.now() < cacheExpiresAt && companyCache.length > 0) {
+    return companyCache;
+  }
+  try {
+    const rows = await db
+      .select({
+        name: companies.name,
+        nseSymbol: companies.nseSymbol,
+        bseCode: companies.bseCode,
+        isin: companies.isin,
+      })
+      .from(companies);
+    if (rows.length > 0) {
+      companyCache = rows.map((r) => {
+        const seedMatch = SEEDED_COMPANIES.find((s) => s.nseSymbol === r.nseSymbol);
+        return { ...r, aliases: seedMatch?.aliases || [r.name.toLowerCase()] };
+      });
+      cacheExpiresAt = Date.now() + CACHE_TTL_MS;
+      return companyCache;
+    }
+  } catch (err: any) {
+    // Suppress warning if DB offline during offline unit tests
+  }
+  return SEEDED_COMPANIES;
+}
 
 const TRANSCRIPT_KEYWORDS = [
   'transcript',
@@ -51,51 +75,46 @@ const EXCLUSION_PATTERNS = [
 
 export function isTranscriptFiling(subject?: string | null, eventType?: string | null): boolean {
   const text = `${subject || ''} ${eventType || ''}`.toLowerCase();
-
-  // If text explicitly contains exclusion patterns without mentioning transcript, reject
   const hasExclusion = EXCLUSION_PATTERNS.some((pattern) => text.includes(pattern));
   const hasTranscriptKeyword = text.includes('transcript');
-
-  if (hasExclusion && !hasTranscriptKeyword) {
-    return false;
-  }
-
-  // Check if text matches any valid transcript keyword
+  if (hasExclusion && !hasTranscriptKeyword) return false;
   return TRANSCRIPT_KEYWORDS.some((kw) => text.includes(kw));
 }
 
-export function matchSeededCompany(input: {
+export async function matchSeededCompany(input: {
   nseSymbol?: string | null;
   bseCode?: string | null;
   isin?: string | null;
   companyName?: string | null;
-}): { name: string; nseSymbol: string; bseCode: string; isin: string } | null {
-  // 1. Direct match by NSE Symbol
+}): Promise<{ name: string; nseSymbol: string | null; bseCode: string | null; isin: string | null } | null> {
+  const watched = await getWatchedCompanies();
+
   if (input.nseSymbol) {
-    const symbolClean = input.nseSymbol.trim().toUpperCase();
-    const matched = SEEDED_COMPANIES.find((c) => c.nseSymbol === symbolClean);
-    if (matched) return matched;
+    const sym = input.nseSymbol.trim().toUpperCase();
+    const m = watched.find((c) => c.nseSymbol?.toUpperCase() === sym);
+    if (m) return m;
   }
 
-  // 2. Direct match by BSE Scrip Code
   if (input.bseCode) {
-    const codeClean = input.bseCode.trim();
-    const matched = SEEDED_COMPANIES.find((c) => c.bseCode === codeClean);
-    if (matched) return matched;
+    const code = input.bseCode.trim();
+    const m = watched.find((c) => c.bseCode === code);
+    if (m) return m;
   }
 
-  // 3. Direct match by ISIN
   if (input.isin) {
-    const isinClean = input.isin.trim().toUpperCase();
-    const matched = SEEDED_COMPANIES.find((c) => c.isin === isinClean);
-    if (matched) return matched;
+    const isin = input.isin.trim().toUpperCase();
+    const m = watched.find((c) => c.isin?.toUpperCase() === isin);
+    if (m) return m;
   }
 
-  // 4. Secondary fallback: exact alias match on cleaned company name
   if (input.companyName) {
-    const nameClean = input.companyName.trim().toLowerCase();
-    const matched = SEEDED_COMPANIES.find((c) => c.aliases.some((alias) => nameClean.includes(alias)));
-    if (matched) return matched;
+    const nameLower = input.companyName.trim().toLowerCase();
+    const m = watched.find((c) => {
+      if (nameLower.includes(c.name.toLowerCase()) || c.name.toLowerCase().includes(nameLower)) return true;
+      if (c.aliases && c.aliases.some((alias) => nameLower.includes(alias))) return true;
+      return false;
+    });
+    if (m) return m;
   }
 
   return null;

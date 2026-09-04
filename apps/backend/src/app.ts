@@ -8,13 +8,11 @@ import { env } from './config/env';
 
 const app = express();
 
-// CORS configuration (allowing local dev ports e.g. 5173, 5174, 5175 and FRONTEND_URL)
 app.use(
   cors({
     origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
       if (
-        !origin ||
-        env.NODE_ENV === 'development' ||
         origin.startsWith('http://localhost:') ||
         origin.startsWith('http://127.0.0.1:') ||
         origin === env.FRONTEND_URL
@@ -27,17 +25,13 @@ app.use(
   })
 );
 
-
-// JSON body parser
 app.use(express.json());
 
-// API Routers
 app.use('/api', healthRouter);
 app.use('/api', companiesRouter);
 app.use('/api', filingsRouter);
 app.use('/api', summariesRouter);
 
-// 404 handler
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
     error: {
@@ -47,7 +41,6 @@ app.use((_req: Request, res: Response) => {
   });
 });
 
-// Centralized Error Handler
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[SERVER ERROR]', err);
   res.status(500).json({

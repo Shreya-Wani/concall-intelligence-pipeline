@@ -2,82 +2,89 @@ import { ExtractionPage } from './types';
 
 export function removePageNumbers(line: string): string | null {
   const trimmed = line.trim();
-
-  // Match pattern: "Page 12", "Page 12 of 45", "12 of 45", or standalone number 1-300
-  if (/^page\s+\d+(\s+of\s+\d+)?$/i.test(trimmed)) return null;
-  if (/^\d+\s+of\s+\d+$/i.test(trimmed)) return null;
+  if (/^page\s+\d+(?:\s+of\s+\d+)?$/i.test(trimmed)) return null;
+  if (/^\d+\s+of\s+\d+$/.test(trimmed)) return null;
   if (/^\d{1,3}$/.test(trimmed)) return null;
-
   return line;
 }
 
-export function detectRepeatedHeadersFooters(pages: ExtractionPage[]): Set<string> {
-  if (pages.length < 2) return new Set();
+export function isPageNumberLine(line: string, isEdge: boolean): boolean {
+  if (!isEdge) return false;
+  return removePageNumbers(line) === null;
+}
 
-  const lineFrequency = new Map<string, number>();
+function normalizeHeaderKey(line: string): string {
+  return line.trim().toLowerCase().replace(/\d+/g, '#');
+}
+
+export function detectRepeatedHeadersFooters(pages: ExtractionPage[]): Set<string> {
+  if (pages.length < 3) return new Set();
+
+  const keyFrequency = new Map<string, number>();
+  const keyToOriginal = new Map<string, string>();
 
   for (const page of pages) {
-    const lines = page.text.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-    if (lines.length === 0) continue;
+    const lines = page.text.split('\n').map((l) => l.trim()).filter((l) => l.length > 5);
+    if (lines.length < 2) continue;
 
-    // Check top 2 lines (headers) and bottom 2 lines (footers)
-    const candidates = new Set<string>();
-    const topLines = lines.slice(0, 2);
-    const bottomLines = lines.slice(-2);
+    const candidates = new Set([...lines.slice(0, 2), ...lines.slice(-2)]);
 
-    [...topLines, ...bottomLines].forEach((line) => {
-      // Ignore very short lines or numerical page numbers
-      if (line.length > 5 && !/^\d+$/.test(line)) {
-        candidates.add(line);
-      }
-    });
-
-    candidates.forEach((cand) => {
-      lineFrequency.set(cand, (lineFrequency.get(cand) || 0) + 1);
-    });
+    for (const line of candidates) {
+      if (/[\u20b9$]|\d+\s*(?:crore|cr|lakh|mn|bn|million|billion|%|bps)/i.test(line)) continue;
+      const key = normalizeHeaderKey(line);
+      keyFrequency.set(key, (keyFrequency.get(key) || 0) + 1);
+      keyToOriginal.set(key, line);
+    }
   }
 
   const repeated = new Set<string>();
-  const threshold = Math.max(2, Math.ceil(pages.length * 0.5)); // Frequency threshold >= 50%
+  const threshold = Math.max(3, Math.ceil(pages.length * 0.4));
 
-  lineFrequency.forEach((count, line) => {
-    // Ensure repeated line is a header/footer artifact and not common financial terms like "Revenue" or "TCS"
-    const lower = line.toLowerCase();
-    const isFinancialTerm = /^(revenue|ebitda|profit|pat|tcs|tata motors|sun pharma|q1|q2|q3|q4|fy25|fy26)$/i.test(lower);
-    if (count >= threshold && !isFinancialTerm) {
-      repeated.add(line);
+  keyFrequency.forEach((count, key) => {
+    if (count >= threshold) {
+      const original = keyToOriginal.get(key)!;
+      repeated.add(original);
     }
   });
 
   return repeated;
 }
 
-export function cleanTranscriptText(pages: ExtractionPage[]): { cleanedText: string; characterCount: number } {
+export function normalizeSpeakerLabels(text: string): string {
+  const SPEAKER_RE = /(?:^|\s+)((?:Management|Analyst|Moderator|Questioner|Operator|[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)?)(?:\s*[-–]\s*[A-Za-z ]+)?:)/g;
+
+  return text.replace(SPEAKER_RE, (match, p1, offset) => {
+    if (offset === 0) return p1;
+    return '\n' + p1;
+  });
+}
+
+export function cleanTranscriptText(
+  pages: ExtractionPage[]
+): { cleanedText: string; characterCount: number } {
   const repeatedArtifacts = detectRepeatedHeadersFooters(pages);
   const cleanedPages: string[] = [];
 
   for (const page of pages) {
     const lines = page.text.split('\n');
+    const pageLineCount = lines.length;
     const processedLines: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const trimmed = line.trim();
+      if (!trimmed) { processedLines.push(''); continue; }
 
-      // Skip repeated header/footer artifacts
-      if (repeatedArtifacts.has(trimmed)) {
-        continue;
-      }
+      const normalizedLine = normalizeHeaderKey(trimmed);
+      const isRepeated = [...repeatedArtifacts].some(
+        (artifact) => normalizeHeaderKey(artifact) === normalizedLine
+      );
+      if (isRepeated) continue;
 
-      // Filter page number artifacts
-      const filtered = removePageNumbers(line);
-      if (filtered === null) {
-        continue;
-      }
+      const isEdge = i < 2 || i >= pageLineCount - 2;
+      if (isPageNumberLine(line, isEdge)) continue;
 
-      // Remove control characters (form feeds, null bytes)
-      const cleanLine = filtered.replace(/[\f\0\v]/g, '').trimEnd();
-      processedLines.push(cleanLine);
+      processedLines.push(line.replace(/[\f\0\v]/g, '').trimEnd());
     }
 
     const pageContent = processedLines.join('\n');
@@ -86,14 +93,9 @@ export function cleanTranscriptText(pages: ExtractionPage[]): { cleanedText: str
     }
   }
 
-  // Join cleaned pages with double newline separator
   let fullText = cleanedPages.join('\n\n');
+  fullText = normalizeSpeakerLabels(fullText);
+  fullText = fullText.replace(/\n{3,}/g, '\n\n').trim();
 
-  // Normalize excessive blank lines (3 or more consecutive newlines -> 2)
-  fullText = fullText.replace(/\n{3,}/g, '\n\n');
-
-  return {
-    cleanedText: fullText.trim(),
-    characterCount: fullText.trim().length,
-  };
+  return { cleanedText: fullText, characterCount: fullText.length };
 }

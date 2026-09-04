@@ -11,7 +11,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts",
-    "test": "tsx --test src/watcher/__tests__/watcher.test.ts src/extraction/__tests__/extraction.test.ts src/summarization/__tests__/summarization.test.ts src/api/__tests__/api-ws.test.ts",
+    "test": "vitest run",
     "ingest:once": "tsx src/watcher/ingest-cli.ts",
     "watcher": "tsx src/watcher/watcher-cli.ts",
     "extract:once": "tsx src/extraction/extraction-cli.ts",
@@ -23,7 +23,6 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/pg": "^8.23.1",
     "axios": "^1.8.1",
-    "bullmq": "^5.41.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.39.3",
@@ -43,6 +42,9 @@
     "@types/ws": "^8.5.14",
     "drizzle-kit": "^0.30.4",
     "tsx": "^4.19.3",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
   }
+
+
 }
